@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   durationIn,
+  clock,
   findRecipes,
+  finished,
+  pauseTimer,
+  remaining,
+  resumeTimer,
+  startTimer,
   formatQuantity,
   ingredientLine,
   minutes,
@@ -11,6 +17,7 @@ import {
   parseSteps,
   parseTags,
   scaled,
+  unitFor,
 } from "./galley.ts";
 
 test("ingredient lines split into quantity, unit, name and notes", () => {
@@ -33,7 +40,7 @@ test("ingredient lines split into quantity, unit, name and notes", () => {
 });
 
 test("ingredients turn back into the same editable line", () => {
-  for (const line of ["2 cup plain flour, sifted", "1½ tbsp olive oil", "500 g beef mince", "Salt, to taste", "⅓ cup cream"]) {
+  for (const line of ["2 cups plain flour, sifted", "1½ tbsp olive oil", "500 g beef mince", "Salt, to taste", "⅓ cup cream", "3 cloves garlic"]) {
     assert.equal(ingredientLine(parseIngredient(line)!), line);
   }
 });
@@ -65,6 +72,17 @@ test("quantities show as a cook writes them, and scale", () => {
   assert.equal(formatQuantity(scaled(1, 3, 2)), "⅔");
 });
 
+test("units read naturally for the amount", () => {
+  assert.equal(unitFor("cup", 2.25), "cups");
+  assert.equal(unitFor("cup", 1), "cup");
+  assert.equal(unitFor("cup", 0.5), "cup");
+  assert.equal(unitFor("clove", 3), "cloves");
+  assert.equal(unitFor("pinch", 2), "pinches");
+  assert.equal(unitFor("tbsp", 2), "tbsp");
+  assert.equal(unitFor("g", 500), "g");
+  assert.equal(unitFor(null, 2), null);
+});
+
 test("tags and times", () => {
   assert.deepEqual(parseTags("Quick, kid-friendly , quick,,"), ["quick", "kid-friendly"]);
   assert.equal(minutes(75), "1 hr 15 min");
@@ -89,4 +107,19 @@ test("finding recipes by words, ingredient and tag", () => {
   assert.deepEqual(titles("MINCE spag"), ["Spaghetti bolognese"]);
   assert.deepEqual(titles("", "quick"), ["Spaghetti bolognese", "Egg fried rice"]);
   assert.deepEqual(titles("pav", "quick"), []);
+});
+
+test("cooking timers count down, pause and resume", () => {
+  let t = startTimer("s3", "Bake", 1500, 0);
+  assert.equal(clock(remaining(t, 0)), "25:00");
+  assert.equal(clock(remaining(t, 60_000)), "24:00");
+  t = pauseTimer(t, 60_000);
+  // Paused: time stands still however long you wait.
+  assert.equal(remaining(t, 10 * 60_000), 1_440_000);
+  t = resumeTimer(t, 10 * 60_000);
+  assert.equal(clock(remaining(t, 10 * 60_000 + 500)), "24:00"); // rounds up, never early
+  assert.equal(finished(t, 10 * 60_000 + 1_440_000), true);
+  assert.equal(remaining(t, 99 * 60 * 60_000), 0);
+  assert.equal(clock(3_909_000), "1:05:09");
+  assert.equal(clock(0), "0:00");
 });

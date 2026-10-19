@@ -113,10 +113,19 @@ export function formatQuantity(n: number): string {
 /** The quantity for a different number of servings. */
 export const scaled = (quantity: number, from: number, to: number) => (quantity * to) / from;
 
-/** Back to one editable line: "1½ cup plain flour, sifted". */
+const PLURAL: Record<string, string> = {
+  cup: "cups", clove: "cloves", can: "cans", pinch: "pinches", bunch: "bunches", handful: "handfuls",
+  slice: "slices", sprig: "sprigs", packet: "packets", stick: "sticks", dash: "dashes",
+};
+
+/** "cup" for one or less, "cups" for more; abbreviations (g, tbsp…) never change. */
+export const unitFor = (unit: string | null, quantity: number | null) =>
+  unit && quantity !== null && quantity > 1 ? (PLURAL[unit] ?? unit) : unit;
+
+/** Back to one editable line: "1½ cups plain flour, sifted". */
 export function ingredientLine(i: Ingredient): string {
   const amount = i.quantity !== null ? formatQuantity(Number(i.quantity)) : "";
-  return [amount, i.unit ?? "", i.name].filter(Boolean).join(" ") + (i.notes ? `, ${i.notes}` : "");
+  return [amount, unitFor(i.unit, i.quantity) ?? "", i.name].filter(Boolean).join(" ") + (i.notes ? `, ${i.notes}` : "");
 }
 
 /** 75 → "1 hr 15 min" */
@@ -155,4 +164,31 @@ export function findRecipes(all: RecipeCard[], q: string, tag: string | null, so
     return words.every((w) => haystack.includes(w));
   });
   return found.sort((a, b) => (sort === "az" ? a.title.localeCompare(b.title) : b.created_at.localeCompare(a.created_at)));
+}
+
+// ---------- cooking-mode timers ----------
+
+/** A countdown: running (endsAt set) or paused (left kept). Times in ms. */
+export type Timer = { id: string; label: string; total: number; endsAt: number | null; left: number };
+
+export const startTimer = (id: string, label: string, seconds: number, now: number): Timer => ({
+  id,
+  label,
+  total: seconds * 1000,
+  endsAt: now + seconds * 1000,
+  left: seconds * 1000,
+});
+
+export const remaining = (t: Timer, now: number) => (t.endsAt === null ? t.left : Math.max(0, t.endsAt - now));
+export const pauseTimer = (t: Timer, now: number): Timer => ({ ...t, endsAt: null, left: remaining(t, now) });
+export const resumeTimer = (t: Timer, now: number): Timer => ({ ...t, endsAt: now + t.left });
+export const finished = (t: Timer, now: number) => remaining(t, now) === 0;
+
+/** 1500000 → "25:00", 3909000 → "1:05:09"; rounds up so it never shows 0:00 early. */
+export function clock(ms: number): string {
+  const s = Math.ceil(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
 }
