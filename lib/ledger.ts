@@ -312,3 +312,39 @@ export function budgetStatus(spent: number, limit: number) {
     state: spent > limit ? ("over" as const) : spent >= limit * NEAR_LIMIT ? ("near" as const) : ("ok" as const),
   };
 }
+
+// ---------- transfers ----------
+
+export type TransferLeg = {
+  account_id: string;
+  amount: number;
+  date: string;
+  description: string | null;
+  transfer_id: string | null;
+  goal_id?: string | null;
+};
+
+export type Transfer = { from: string; to: string; amount: number; date: string; note: string | null; goalId: string | null };
+
+/** Both halves of each transfer, joined up: from the account that paid, to the one that received. */
+export function transfersById(legs: TransferLeg[]): Record<string, Transfer> {
+  const out: Record<string, Transfer> = {};
+  for (const leg of legs) {
+    if (!leg.transfer_id) continue;
+    const t = (out[leg.transfer_id] ??= {
+      from: "", to: "", amount: Math.abs(Number(leg.amount)), date: leg.date, note: leg.description, goalId: null,
+    });
+    if (Number(leg.amount) < 0) t.from = leg.account_id;
+    else {
+      t.to = leg.account_id;
+      t.goalId = leg.goal_id ?? null;
+    }
+  }
+  return out;
+}
+
+/** A list with each transfer shown once (its first half to appear), in the same order. */
+export function onePerTransfer<T extends { transfer_id: string | null }>(rows: T[]): T[] {
+  const seen = new Set<string>();
+  return rows.filter((r) => !r.transfer_id || (!seen.has(r.transfer_id) && seen.add(r.transfer_id)));
+}

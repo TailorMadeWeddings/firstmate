@@ -277,6 +277,66 @@ test("budget limits: positive, one per category, gone with their category", asyn
   assert.equal(left, 0);
 });
 
+test("transfers: one step, balances move, reports ignore them", async () => {
+  const db = await setup();
+  const SAVINGS = "20000000-0000-0000-0000-000000000002";
+  await db.exec(`insert into budget_accounts (id, household_id, name, type) values ('${SAVINGS}', '${HOME}', 'Savings', 'savings')`);
+  const result = await as(db, OWNER, async (tx) => {
+    const id = (
+      await tx.query<{ id: string }>(
+        `select budget_save_transfer(null, '${ACCOUNT}', '${SAVINGS}', 500, '2026-10-19', 'Top up') as id`,
+      )
+    ).rows[0].id;
+    const balances = (await tx.query("select id, balance::text from budget_account_balances order by id")).rows;
+    const outOct = (await tx.query("select coalesce(sum(money_out), 0)::text as out, coalesce(sum(money_in), 0)::text as in from budget_monthly_totals where month = '2026-10-01'")).rows;
+    // Editing replaces both halves together.
+    await tx.query(`select budget_save_transfer('${id}'::uuid, '${SAVINGS}', '${ACCOUNT}', 120, '2026-10-20')`);
+    const legs = (await tx.query("select account_id, amount::text from budget_transactions where transfer_id is not null order by amount")).rows;
+    return { balances, outOct, legs };
+  });
+  assert.deepEqual(result.balances, [
+    { id: ACCOUNT, balance: "-584.20" },
+    { id: SAVINGS, balance: "500.00" },
+  ]);
+  // Only the fixture's -84.20 grocery shop counts; the transfer doesn't.
+  assert.deepEqual(result.outOct, [{ out: "84.20", in: "0" }]);
+  assert.deepEqual(result.legs, [
+    { account_id: SAVINGS, amount: "-120.00" },
+    { account_id: ACCOUNT, amount: "120.00" },
+  ]);
+
+  const save = (who: string | null, from: string, to: string, amount: number) =>
+    as(db, who, (tx) => tx.query(`select budget_save_transfer(null, '${from}', '${to}', ${amount}, '2026-10-19')`));
+  await assert.rejects(save(OWNER, ACCOUNT, ACCOUNT, 5), /different accounts/);
+  await assert.rejects(save(OWNER, ACCOUNT, SAVINGS, 0), /more than 0/);
+  // Non-owners can't see the accounts, so can't move money.
+  await assert.rejects(save(TRUSTED, ACCOUNT, SAVINGS, 5), /account not found/);
+  // Another household's owner can't send money into our account.
+  const THEIRS = "20000000-0000-0000-0000-000000000003";
+  await db.exec(`insert into budget_accounts (id, household_id, name, type) values ('${THEIRS}', '${OTHER_HOME}', 'Theirs', 'cash')`);
+  await assert.rejects(save(OTHER_OWNER, THEIRS, ACCOUNT, 5), /foreign key/);
+  // A transfer can't carry a category.
+  await assert.rejects(
+    as(db, OWNER, (tx) =>
+      tx.query(`insert into budget_transactions (household_id, account_id, category_id, date, amount, transfer_id)
+                values ('${HOME}', '${ACCOUNT}', '${CATEGORY}', '2026-10-19', -5, gen_random_uuid())`),
+    ),
+    /check constraint/,
+  );
+});
+
+test("transfers into a goal count towards it", async () => {
+  const db = await setup();
+  const SAVINGS = "20000000-0000-0000-0000-000000000002";
+  await db.exec(`insert into budget_accounts (id, household_id, name, type) values ('${SAVINGS}', '${HOME}', 'Savings', 'savings')`);
+  const saved = await as(db, OWNER, async (tx) => {
+    await tx.query(`select budget_save_transfer(null, '${ACCOUNT}', '${SAVINGS}', 250, '2026-10-19', null, '${GOAL}')`);
+    return (await tx.query("select saved::text from budget_goal_progress")).rows;
+  });
+  // 400 already saved + 250 moved in.
+  assert.deepEqual(saved, [{ saved: "650.00" }]);
+});
+
 test("ledger: constraints", async () => {
   const db = await setup();
   const insert = (sql: string) => as(db, OWNER, (tx) => tx.query(sql));

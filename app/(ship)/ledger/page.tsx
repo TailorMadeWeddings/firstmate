@@ -6,15 +6,26 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
-import { ACCOUNT_TYPES, budgetStatus, daysUntil, label, money, spendingByCategory, today } from "@/lib/ledger";
+import {
+  ACCOUNT_TYPES,
+  budgetStatus,
+  daysUntil,
+  label,
+  money,
+  onePerTransfer,
+  spendingByCategory,
+  today,
+  transfersById,
+} from "@/lib/ledger";
 import { currentOwner } from "@/lib/players";
 import { createClient } from "@/lib/supabase/server";
-import { addAccount, addTransaction, importCsv } from "./actions";
+import { addAccount, addTransaction, importCsv, saveTransfer } from "./actions";
 import {
   BillRow,
   BudgetBar,
   type Transaction,
   TransactionFields,
+  TransferFields,
   loadAccounts,
   loadBills,
   loadCategories,
@@ -50,15 +61,26 @@ async function LedgerHome({ searchParams }: { searchParams: Search }) {
     supabase.from("budget_account_balances").select("id, balance"),
     supabase
       .from("budget_transactions")
-      .select("id, date, amount, description, notes, account_id, category_id, goal_id")
+      .select("id, date, amount, description, notes, account_id, category_id, goal_id, transfer_id")
       .order("date", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(50),
   ]);
   if (balances.error) throw balances.error;
   if (recent.error) throw recent.error;
+  // Both halves of any transfer in the list, so each shows once as "from → to".
+  const transferIds = [...new Set(recent.data.flatMap((t) => (t.transfer_id ? [t.transfer_id] : [])))];
+  const { data: legs, error: legsError } = transferIds.length
+    ? await supabase
+        .from("budget_transactions")
+        .select("account_id, amount, date, description, transfer_id, goal_id")
+        .in("transfer_id", transferIds)
+    : { data: [], error: null };
+  if (legsError) throw legsError;
+  const transfers = transfersById(legs ?? []);
   const balanceOf = (id: string) => balances.data.find((b) => b.id === id)?.balance ?? 0;
   const transactions = recent.data as Transaction[];
+  const accountName = (id: string) => accounts.find((a) => a.id === id)?.name ?? "?";
   const total = accounts.reduce((sum, a) => sum + Number(balanceOf(a.id)), 0);
   // Overdue first (bills are ordered by due date), then the next 30 days.
   const upcoming = bills.filter((b) => daysUntil(b.next_due) <= 30);
@@ -208,6 +230,21 @@ async function LedgerHome({ searchParams }: { searchParams: Search }) {
               <Button className="self-start">Import</Button>
             </ActionForm>
           </details>
+          {accounts.length > 1 && (
+            <details>
+              <summary className="cursor-pointer text-sm text-muted-foreground">
+                Move money between accounts
+              </summary>
+              <ActionForm action={saveTransfer.bind(null, null)} className="mt-3 flex flex-col gap-3 rounded-xl border p-4">
+                <p className="text-sm text-muted-foreground">
+                  Paying off a card or topping up savings. Transfers don&apos;t count as spending or
+                  income.
+                </p>
+                <TransferFields accounts={accounts} />
+                <Button className="self-start">Move money</Button>
+              </ActionForm>
+            </details>
+          )}
         </section>
       )}
 
@@ -215,7 +252,29 @@ async function LedgerHome({ searchParams }: { searchParams: Search }) {
         <section className="flex flex-col gap-3">
           <h2 className="font-semibold">Recent</h2>
           <ul className="divide-y rounded-xl border">
-            {transactions.map((t) => {
+            {onePerTransfer(transactions).map((t) => {
+              const pair = t.transfer_id ? transfers[t.transfer_id] : null;
+              if (pair) {
+                const toGoal = goals.find((g) => g.id === pair.goalId);
+                return (
+                  <li key={t.id}>
+                    <Link
+                      href={`/ledger/transfers/${t.transfer_id}`}
+                      className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-muted"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate">
+                          {toGoal ? `Saved for ${toGoal.name}` : pair.note || "Transfer"}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {pair.date} · {accountName(pair.from)} → {accountName(pair.to)}
+                        </span>
+                      </span>
+                      <span className="tabular-nums text-muted-foreground">{money(pair.amount)}</span>
+                    </Link>
+                  </li>
+                );
+              }
               const category = categories.find((c) => c.id === t.category_id);
               const account = accounts.find((a) => a.id === t.account_id);
               const goal = goals.find((g) => g.id === t.goal_id);

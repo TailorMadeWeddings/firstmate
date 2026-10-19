@@ -317,10 +317,19 @@ export async function contribute(goalId: string, _: Result, form: FormData): Pro
   const date = text(form, "date");
   if (!amount) return "Enter an amount, like 200.";
   if (!isDate(date)) return "Pick a date.";
+  const into = text(form, "account_id");
+  const from = text(form, "from_account_id");
+  // Moved from another account: a transfer whose arriving half counts towards the goal.
+  if (from && from !== into) {
+    const { error } = await supabase.rpc("budget_save_transfer", {
+      p_transfer: null, p_from: from, p_to: into, p_amount: amount, p_date: date, p_goal: goalId,
+    });
+    return done(error, "Pick an account.");
+  }
   const { error } = await supabase.from("budget_transactions").insert({
     household_id: owner.householdId,
     goal_id: goalId,
-    account_id: text(form, "account_id"),
+    account_id: into,
     date,
     amount,
   });
@@ -344,11 +353,16 @@ export async function deleteGoal(id: string): Promise<Result> {
 
 export async function deleteContribution(id: string): Promise<Result> {
   const { supabase } = await db();
-  const { error } = await supabase
+  const { data: row } = await supabase
     .from("budget_transactions")
-    .delete()
+    .select("transfer_id")
     .eq("id", id)
-    .not("goal_id", "is", null);
+    .not("goal_id", "is", null)
+    .maybeSingle<{ transfer_id: string | null }>();
+  if (!row) return "That contribution is gone.";
+  // Moved from another account: take back both halves of the transfer.
+  const q = supabase.from("budget_transactions").delete();
+  const { error } = await (row.transfer_id ? q.eq("transfer_id", row.transfer_id) : q.eq("id", id));
   return done(error);
 }
 
@@ -380,4 +394,53 @@ export async function setLimit(categoryId: string, _: Result, form: FormData): P
     updated_at: new Date().toISOString(),
   });
   return done(error);
+}
+
+// ---------- transfers ----------
+
+/** Creates a transfer, or replaces transfer `id`, both halves in one database call. */
+export async function saveTransfer(id: string | null, _: Result, form: FormData): Promise<Result> {
+  const { supabase } = await db();
+  const amount = parseAmount(text(form, "amount"));
+  const date = text(form, "date");
+  const from = text(form, "from_account_id");
+  const to = text(form, "to_account_id");
+  if (!amount) return "Enter an amount, like 500.";
+  if (!isDate(date)) return "Pick a date.";
+  if (!from || !to) return "Pick both accounts.";
+  if (from === to) return "Pick two different accounts.";
+  // Keep a goal tag when editing money that was put towards a goal.
+  let goal: string | null = null;
+  if (id) {
+    const { data } = await supabase
+      .from("budget_transactions")
+      .select("goal_id")
+      .eq("transfer_id", id)
+      .gt("amount", 0)
+      .maybeSingle<{ goal_id: string | null }>();
+    goal = data?.goal_id ?? null;
+  }
+  const { error } = await supabase.rpc("budget_save_transfer", {
+    p_transfer: id,
+    p_from: from,
+    p_to: to,
+    p_amount: amount,
+    p_date: date,
+    p_note: optional(form, "note"),
+    p_goal: goal,
+  });
+  if (error?.code === "P0004") return "Pick two different accounts.";
+  if (error?.code === "P0006") return "That account or transfer is gone.";
+  if (error) return done(error, "Pick both accounts.");
+  revalidatePath("/ledger", "layout");
+  if (id) redirect("/ledger");
+  return null;
+}
+
+export async function deleteTransfer(id: string): Promise<Result> {
+  const { supabase } = await db();
+  const { error } = await supabase.from("budget_transactions").delete().eq("transfer_id", id);
+  if (error) return done(error);
+  revalidatePath("/ledger", "layout");
+  redirect("/ledger");
 }

@@ -312,8 +312,9 @@ async function DrillDown({
   const supabase = await createClient();
   let q = supabase
     .from("budget_transactions")
-    .select("id, date, amount, description, notes, account_id, category_id, goal_id")
+    .select("id, date, amount, description, notes, account_id, category_id, goal_id, transfer_id")
     .is("goal_id", null)
+    .is("transfer_id", null)
     .gte("date", `${p.from}-01`)
     .lt("date", `${addMonths(p.to, 1)}-01`)
     .order("date", { ascending: false })
