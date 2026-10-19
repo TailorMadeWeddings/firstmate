@@ -297,3 +297,18 @@ export const withChildren = (id: string, categories: Category[]) => [
   id,
   ...categories.filter((c) => c.parent_category_id === id).map((c) => c.id),
 ];
+
+// ---------- category budgets ----------
+
+/** Share of a limit that counts as getting close. */
+export const NEAR_LIMIT = 0.85;
+
+/** How a category is doing against its limit: ok, near (85%+) or over. */
+export function budgetStatus(spent: number, limit: number) {
+  const cents = (n: number) => Math.round(n * 100) / 100;
+  return {
+    percent: Math.round((spent / limit) * 100),
+    left: cents(limit - spent),
+    state: spent > limit ? ("over" as const) : spent >= limit * NEAR_LIMIT ? ("near" as const) : ("ok" as const),
+  };
+}

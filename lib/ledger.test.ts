@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   type Category,
   addMonths,
+  budgetStatus,
   daysUntil,
   type Imported,
   forEntry,
@@ -149,4 +150,13 @@ test("report totals, category roll-up and monthly series", () => {
     [0, 400],
   );
   assert.deepEqual(withChildren("t", cats), ["t", "f"]);
+});
+
+test("budget status", () => {
+  assert.deepEqual(budgetStatus(450, 900), { percent: 50, left: 450, state: "ok" });
+  assert.deepEqual(budgetStatus(765, 900), { percent: 85, left: 135, state: "near" });
+  assert.deepEqual(budgetStatus(900, 900), { percent: 100, left: 0, state: "near" });
+  assert.deepEqual(budgetStatus(900.1, 900), { percent: 100, left: -0.1, state: "over" });
+  assert.deepEqual(budgetStatus(0.3, 0.1 + 0.2), { percent: 100, left: 0, state: "near" });
+  assert.equal(budgetStatus(1350, 900).percent, 150);
 });

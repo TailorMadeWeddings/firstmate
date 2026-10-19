@@ -21,7 +21,7 @@ import {
 } from "@/lib/ledger";
 import { currentOwner } from "@/lib/players";
 import { createClient } from "@/lib/supabase/server";
-import { type Transaction, loadAccounts, loadBills, loadCategories, loadGoals } from "../shared";
+import { type Transaction, loadAccounts, loadBills, loadCategories, loadGoals, loadLimits } from "../shared";
 
 export const metadata: Metadata = { title: "Reports · Ledger · First Mate" };
 
@@ -55,8 +55,9 @@ async function Reports({ searchParams }: { searchParams: Promise<Search> }) {
   const trendMonths = Array.from({ length: 12 }, (_, i) => addMonths(p.to, i - 11));
   const start = [p.previous.from, trendMonths[0]].sort()[0];
   const supabase = await createClient();
-  const [categories, accounts, bills, goals, totalsRes, balancesRes, progressRes] = await Promise.all([
+  const [categories, limits, accounts, bills, goals, totalsRes, balancesRes, progressRes] = await Promise.all([
     loadCategories(),
+    loadLimits(),
     loadAccounts(),
     loadBills(),
     loadGoals(),
@@ -108,7 +109,17 @@ async function Reports({ searchParams }: { searchParams: Promise<Search> }) {
         {spending.length === 0 ? (
           <p className="text-sm text-muted-foreground">No spending in this period.</p>
         ) : (
-          <CategoryBars spending={spending} categories={categories} query={query} selected={search.category} />
+          <CategoryBars
+            spending={spending}
+            categories={categories}
+            query={query}
+            selected={search.category}
+            // A monthly limit covers the whole range: limit × months.
+            limitFor={(id) => {
+              const l = limits.find((x) => x.category_id === id);
+              return l ? Number(l.monthly_amount) * p.months.length : null;
+            }}
+          />
         )}
         {search.category && (
           <DrillDown
@@ -238,11 +249,13 @@ function CategoryBars({
   categories,
   query,
   selected,
+  limitFor,
 }: {
   spending: { id: string | null; amount: number }[];
   categories: Category[];
   query: (extra?: Record<string, string>) => string;
   selected?: string;
+  limitFor: (id: string | null) => number | null;
 }) {
   const max = spending[0].amount;
   return (
@@ -251,6 +264,7 @@ function CategoryBars({
         const c = categories.find((x) => x.id === id);
         const key = id ?? "none";
         const name = c ? `${c.icon ? `${c.icon} ` : ""}${c.name}` : "Uncategorised";
+        const limit = limitFor(id);
         return (
           <li key={key}>
             <Link
@@ -264,7 +278,15 @@ function CategoryBars({
                   className="h-4 rounded-r-[4px] bg-[var(--money-out)] transition group-hover:brightness-110"
                   style={{ width: `${Math.max((amount / max) * 85, 1)}%` }}
                 />
-                <span className="whitespace-nowrap text-sm tabular-nums">{money(amount)}</span>
+                <span className="whitespace-nowrap text-sm tabular-nums">
+                  {money(amount)}
+                  {limit !== null && (
+                    <span className={amount > limit ? "font-semibold text-red-600" : "text-muted-foreground"}>
+                      {" "}
+                      {amount > limit ? `▲ over ${money(limit)}` : `of ${money(limit)}`}
+                    </span>
+                  )}
+                </span>
               </span>
             </Link>
           </li>

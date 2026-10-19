@@ -6,18 +6,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
-import { ACCOUNT_TYPES, daysUntil, label, money } from "@/lib/ledger";
+import { ACCOUNT_TYPES, budgetStatus, daysUntil, label, money, spendingByCategory, today } from "@/lib/ledger";
 import { currentOwner } from "@/lib/players";
 import { createClient } from "@/lib/supabase/server";
 import { addAccount, addTransaction, importCsv } from "./actions";
 import {
   BillRow,
+  BudgetBar,
   type Transaction,
   TransactionFields,
   loadAccounts,
   loadBills,
   loadCategories,
   loadGoals,
+  loadLimits,
+  loadMonthlyTotals,
 } from "./shared";
 
 export const metadata: Metadata = { title: "Ledger · First Mate" };
@@ -36,11 +39,14 @@ async function LedgerHome({ searchParams }: { searchParams: Search }) {
   await currentOwner();
   const { imported, skipped } = await searchParams;
   const supabase = await createClient();
-  const [accounts, categories, bills, goals, balances, recent] = await Promise.all([
+  const month = today().slice(0, 7);
+  const [accounts, categories, bills, goals, limits, monthRows, balances, recent] = await Promise.all([
     loadAccounts(),
     loadCategories(),
     loadBills(),
     loadGoals(),
+    loadLimits(),
+    loadMonthlyTotals(month, month),
     supabase.from("budget_account_balances").select("id, balance"),
     supabase
       .from("budget_transactions")
@@ -56,13 +62,23 @@ async function LedgerHome({ searchParams }: { searchParams: Search }) {
   const total = accounts.reduce((sum, a) => sum + Number(balanceOf(a.id)), 0);
   // Overdue first (bills are ordered by due date), then the next 30 days.
   const upcoming = bills.filter((b) => daysUntil(b.next_due) <= 30);
+  // The budgets closest to (or over) their limit this month.
+  const spending = spendingByCategory(monthRows, categories, month, month);
+  const budgets = limits
+    .map((l) => {
+      const spent = spending.find((s) => s.id === l.category_id)?.amount ?? 0;
+      const limit = Number(l.monthly_amount);
+      return { category: categories.find((c) => c.id === l.category_id), spent, limit, used: budgetStatus(spent, limit).percent };
+    })
+    .sort((a, b) => b.used - a.used)
+    .slice(0, 4);
 
   return (
     <div className="flex flex-col gap-8">
       <header className="flex items-baseline justify-between gap-4">
         <h1 className="text-3xl font-bold">Ledger</h1>
         <nav className="flex gap-4 text-sm">
-          {["reports", "bills", "goals", "categories"].map((page) => (
+          {["reports", "budgets", "bills", "goals", "categories"].map((page) => (
             <Link key={page} href={`/ledger/${page}`} className="capitalize hover:underline">
               {page}
             </Link>
@@ -75,6 +91,25 @@ async function LedgerHome({ searchParams }: { searchParams: Search }) {
           Imported {imported} transaction{imported === "1" ? "" : "s"}
           {Number(skipped) > 0 && `, skipped ${skipped} already in the Ledger`}.
         </p>
+      )}
+
+      {budgets.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="font-semibold">Budgets this month</h2>
+            <Link href="/ledger/budgets" className="text-sm text-muted-foreground hover:underline">
+              All budgets
+            </Link>
+          </div>
+          <div className="grid gap-3 rounded-xl border p-4 sm:grid-cols-2">
+            {budgets.map((b) => (
+              <div key={b.category?.id} className="flex flex-col gap-1">
+                <span className="text-sm font-medium">{b.category?.name}</span>
+                <BudgetBar spent={b.spent} limit={b.limit} />
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       {upcoming.length > 0 && (
