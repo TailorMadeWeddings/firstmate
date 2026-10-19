@@ -156,3 +156,30 @@ export function findRecipes(all: RecipeCard[], q: string, tag: string | null, so
   });
   return found.sort((a, b) => (sort === "az" ? a.title.localeCompare(b.title) : b.created_at.localeCompare(a.created_at)));
 }
+
+// ---------- cooking-mode timers ----------
+
+/** A countdown: running (endsAt set) or paused (left kept). Times in ms. */
+export type Timer = { id: string; label: string; total: number; endsAt: number | null; left: number };
+
+export const startTimer = (id: string, label: string, seconds: number, now: number): Timer => ({
+  id,
+  label,
+  total: seconds * 1000,
+  endsAt: now + seconds * 1000,
+  left: seconds * 1000,
+});
+
+export const remaining = (t: Timer, now: number) => (t.endsAt === null ? t.left : Math.max(0, t.endsAt - now));
+export const pauseTimer = (t: Timer, now: number): Timer => ({ ...t, endsAt: null, left: remaining(t, now) });
+export const resumeTimer = (t: Timer, now: number): Timer => ({ ...t, endsAt: now + t.left });
+export const finished = (t: Timer, now: number) => remaining(t, now) === 0;
+
+/** 1500000 → "25:00", 3909000 → "1:05:09"; rounds up so it never shows 0:00 early. */
+export function clock(ms: number): string {
+  const s = Math.ceil(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}

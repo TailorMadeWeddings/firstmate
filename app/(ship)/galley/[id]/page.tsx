@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Clock, ExternalLink, Timer, Users } from "lucide-react";
+import { ChefHat, Clock, ExternalLink, Timer, Users } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
@@ -56,6 +56,13 @@ async function RecipeView({ params }: { params: Promise<{ id: string }> }) {
             </a>
           )}
         </div>
+        {recipe.steps.length > 0 && (
+          <Button asChild size="lg" className="self-start">
+            <Link href={`/galley/${recipe.id}/cook`}>
+              <ChefHat aria-hidden /> Cook this
+            </Link>
+          </Button>
+        )}
         {recipe.tags.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {recipe.tags.map((t) => (

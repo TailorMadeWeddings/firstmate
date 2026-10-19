@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   durationIn,
+  clock,
   findRecipes,
+  finished,
+  pauseTimer,
+  remaining,
+  resumeTimer,
+  startTimer,
   formatQuantity,
   ingredientLine,
   minutes,
@@ -89,4 +95,19 @@ test("finding recipes by words, ingredient and tag", () => {
   assert.deepEqual(titles("MINCE spag"), ["Spaghetti bolognese"]);
   assert.deepEqual(titles("", "quick"), ["Spaghetti bolognese", "Egg fried rice"]);
   assert.deepEqual(titles("pav", "quick"), []);
+});
+
+test("cooking timers count down, pause and resume", () => {
+  let t = startTimer("s3", "Bake", 1500, 0);
+  assert.equal(clock(remaining(t, 0)), "25:00");
+  assert.equal(clock(remaining(t, 60_000)), "24:00");
+  t = pauseTimer(t, 60_000);
+  // Paused: time stands still however long you wait.
+  assert.equal(remaining(t, 10 * 60_000), 1_440_000);
+  t = resumeTimer(t, 10 * 60_000);
+  assert.equal(clock(remaining(t, 10 * 60_000 + 500)), "24:00"); // rounds up, never early
+  assert.equal(finished(t, 10 * 60_000 + 1_440_000), true);
+  assert.equal(remaining(t, 99 * 60 * 60_000), 0);
+  assert.equal(clock(3_909_000), "1:05:09");
+  assert.equal(clock(0), "0:00");
 });
