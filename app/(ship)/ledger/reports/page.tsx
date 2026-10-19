@@ -373,7 +373,6 @@ function Trend({ trend }: { trend: ReturnType<typeof monthly> }) {
               <span className="w-full max-w-[24px] rounded-t-[4px] bg-[var(--money-out)]" style={{ height: height(m.moneyOut) }} />
               <span
                 role="tooltip"
-
                 className={`pointer-events-none absolute bottom-full z-10 mb-1 hidden min-w-36 rounded-md border bg-background p-2 text-xs shadow-md group-hover:block group-focus-visible:block ${
                   i < trend.length / 2 ? "left-0" : "right-0"
                 }`}
