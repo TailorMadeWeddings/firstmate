@@ -90,7 +90,7 @@ export function CookingMode({ id, title, ingredients, steps }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Space on a focused button presses that button; don't also turn the page.
-      if ((e.target as HTMLElement).closest("button, a")) return;
+      if (e.target instanceof Element && e.target.closest("button, a")) return;
       if (e.key === "ArrowRight" || e.key === " ") go(1);
       if (e.key === "ArrowLeft") go(-1);
     };

@@ -90,7 +90,9 @@ export function LineList({
               const lines = e.clipboardData.getData("text").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
               if (lines.length < 2) return;
               e.preventDefault();
-              set(i, r.text ? `${r.text} ${lines[0]}` : lines[0]);
+              // The first line goes where the cursor is; the rest become new items after this one.
+              const { selectionStart: from, selectionEnd: to } = e.currentTarget;
+              set(i, r.text.slice(0, from ?? r.text.length) + lines[0] + r.text.slice(to ?? r.text.length));
               insertAfter(i, lines.slice(1));
             },
           };
