@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { currentCrew } from "@/lib/players";
+import { currentMember } from "@/lib/players";
 import { loadRecipe } from "../../data";
 import { CookingMode } from "./cooking-mode";
 
@@ -16,7 +16,7 @@ export default function CookPage({ params }: { params: Promise<{ id: string }> }
 }
 
 async function Cook({ params }: { params: Promise<{ id: string }> }) {
-  await currentCrew();
+  await currentMember();
   const { id } = await params;
   const recipe = await loadRecipe(id);
   if (!recipe || recipe.steps.length === 0) notFound();

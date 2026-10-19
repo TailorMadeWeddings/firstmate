@@ -16,6 +16,7 @@ import {
   startTimer,
   unitFor,
 } from "@/lib/galley";
+import { markCooked } from "../../actions";
 
 type Props = { id: string; title: string; ingredients: Ingredient[]; steps: Step[] };
 
@@ -89,7 +90,7 @@ export function CookingMode({ id, title, ingredients, steps }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Space on a focused button presses that button; don't also turn the page.
-      if ((e.target as HTMLElement).closest("button, a")) return;
+      if (e.target instanceof Element && e.target.closest("button, a")) return;
       if (e.key === "ArrowRight" || e.key === " ") go(1);
       if (e.key === "ArrowLeft") go(-1);
     };
@@ -233,9 +234,10 @@ export function CookingMode({ id, title, ingredients, steps }: Props) {
               {page === 0 ? "Start cooking" : "Next step"} <ChevronRight className="size-8" aria-hidden />
             </button>
           ) : (
-            <Link href={`/galley/${id}`} className={`${big} bg-primary text-primary-foreground`}>
-              Done
-            </Link>
+            // Finishing notes it was cooked, for "recently cooked"; the X up top just leaves.
+            <form action={markCooked.bind(null, id)} className="flex flex-1">
+              <button className={`${big} bg-primary text-primary-foreground`}>Done</button>
+            </form>
           )}
         </div>
       </footer>

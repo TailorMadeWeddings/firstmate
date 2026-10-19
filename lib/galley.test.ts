@@ -4,6 +4,9 @@ import {
   durationIn,
   clock,
   findRecipes,
+  isoMinutes,
+  recipeFromPage,
+  type Sort,
   finished,
   pauseTimer,
   remaining,
@@ -94,19 +97,54 @@ test("tags and times", () => {
 test("finding recipes by words, ingredient and tag", () => {
   const card = (title: string, created_at: string, tags: string[], ingredients: string[]) => ({
     id: title, title, description: null, servings: 4, prep_minutes: null, cook_minutes: null, created_at, tags, ingredients,
+    collections: title === "Pavlova" ? ["sweets"] : [], cooked_at: title === "Pavlova" ? "2026-10-10" : title === "Egg fried rice" ? "2026-10-12" : null, photo: null,
   });
   const all = [
     card("Pavlova", "2026-10-01", ["dessert"], ["egg whites", "caster sugar"]),
     card("Spaghetti bolognese", "2026-10-03", ["quick", "kid-friendly"], ["beef mince", "spaghetti"]),
     card("Egg fried rice", "2026-10-02", ["quick"], ["rice", "eggs"]),
   ];
-  const titles = (q: string, tag: string | null = null, sort: "new" | "az" = "new") => findRecipes(all, q, tag, sort).map((r) => r.title);
+  const titles = (q: string, tag: string | null = null, sort: Sort = "new") => findRecipes(all, { q, tag, sort }).map((r) => r.title);
   assert.deepEqual(titles(""), ["Spaghetti bolognese", "Egg fried rice", "Pavlova"]);
   assert.deepEqual(titles("", null, "az"), ["Egg fried rice", "Pavlova", "Spaghetti bolognese"]);
   assert.deepEqual(titles("egg"), ["Egg fried rice", "Pavlova"]); // title, or an ingredient
   assert.deepEqual(titles("MINCE spag"), ["Spaghetti bolognese"]);
   assert.deepEqual(titles("", "quick"), ["Spaghetti bolognese", "Egg fried rice"]);
   assert.deepEqual(titles("pav", "quick"), []);
+  assert.deepEqual(titles("", null, "cooked"), ["Egg fried rice", "Pavlova", "Spaghetti bolognese"]);
+  assert.deepEqual(findRecipes(all, { collection: "sweets" }).map((r) => r.title), ["Pavlova"]);
+});
+
+test("importing a recipe from a website's schema.org data", () => {
+  const page = `<html><head>
+    <script type="application/ld+json">{"@type":"WebSite","name":"Taste"}</script>
+    <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebPage"},{
+      "@type":["Recipe"],"name":"Anzac biscuits &amp; more","description":"<p>Crunchy &#8211; chewy</p>",
+      "recipeYield":["20","20 biscuits"],"prepTime":"PT15M","cookTime":"PT1H5M",
+      "recipeIngredient":["1 cup rolled oats","&frac12; cup golden syrup","125g butter, melted"],
+      "recipeInstructions":[{"@type":"HowToSection","itemListElement":[
+        {"@type":"HowToStep","text":"Mix the dry ingredients."},{"@type":"HowToStep","text":"Bake for 12 minutes."}]}],
+      "recipeCategory":"Biscuits","recipeCuisine":["Australian"]}]}</script></head></html>`;
+  const r = recipeFromPage(page, "https://example.com/anzac");
+  assert.deepEqual(r && { ...r, ingredients: r.ingredients.map(ingredientLine) }, {
+    title: "Anzac biscuits & more",
+    description: "Crunchy – chewy",
+    source_url: "https://example.com/anzac",
+    servings: 20,
+    prep_minutes: 15,
+    cook_minutes: 65,
+    ingredients: ["1 cup rolled oats", "½ cup golden syrup", "125 g butter, melted"],
+    steps: [
+      { instruction: "Mix the dry ingredients.", duration_seconds: null },
+      { instruction: "Bake for 12 minutes.", duration_seconds: 720 },
+    ],
+    tags: ["biscuits", "australian"],
+  });
+  assert.equal(recipeFromPage("<html><body>No recipe here</body></html>", "https://example.com"), null);
+  assert.equal(recipeFromPage(`<script type="application/ld+json">{not json</script>`, "https://example.com"), null);
+  assert.equal(isoMinutes("PT2H"), 120);
+  assert.equal(isoMinutes("P0DT0H0M"), null);
+  assert.equal(isoMinutes("20 mins"), null);
 });
 
 test("cooking timers count down, pause and resume", () => {

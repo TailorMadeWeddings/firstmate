@@ -77,15 +77,16 @@ function age(born: string) {
   return years < 1 ? "baby" : `${years}`;
 }
 
-export type Entry = Occurrence & { assignees: string[]; createdBy: string };
+/** recipeId: the recipe, when the event is cooking a meal (KID-21). */
+export type Entry = Occurrence & { assignees: string[]; createdBy: string; recipeId: string | null };
 
 /** Every occurrence overlapping [from, to), with who it's for. */
 export async function loadEntries(from: Date, to: Date): Promise<Entry[]> {
   const supabase = await createClient();
-  const events = must<(EventRow & { created_by: string })[]>(
+  const events = must<(EventRow & { created_by: string; recipe_id: string | null })[]>(
     await supabase
       .from("events")
-      .select("id, title, description, location, start_at, end_at, all_day, recurrence_rule, recurrence_ends_at, created_by")
+      .select("id, title, description, location, start_at, end_at, all_day, recurrence_rule, recurrence_ends_at, created_by, recipe_id")
       .lt("start_at", to.toISOString())
       .or(`recurrence_rule.not.is.null,end_at.gt.${from.toISOString()}`)
       .or(`recurrence_ends_at.is.null,recurrence_ends_at.gt.${from.toISOString()}`),
@@ -104,10 +105,11 @@ export async function loadEntries(from: Date, to: Date): Promise<Entry[]> {
     const key = a.profile_id ? `p:${a.profile_id}` : `d:${a.dependent_id}`;
     who.set(a.event_id, [...(who.get(a.event_id) ?? []), key]);
   }
-  const creator = new Map(events.map((e) => [e.id, e.created_by]));
+  const byId = new Map(events.map((e) => [e.id, e]));
   return occurrences(events, must<ExceptionRow[]>(exceptions), from, to).map((o) => ({
     ...o,
     assignees: who.get(o.eventId) ?? [],
-    createdBy: creator.get(o.eventId) ?? "",
+    createdBy: byId.get(o.eventId)?.created_by ?? "",
+    recipeId: byId.get(o.eventId)?.recipe_id ?? null,
   }));
 }

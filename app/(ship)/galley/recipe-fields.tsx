@@ -2,15 +2,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ingredientLine } from "@/lib/galley";
 import type { Recipe } from "./data";
+import { LineList } from "./line-list";
 
-const area =
-  "w-full rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:text-sm";
+export type Draft = Pick<Recipe, "title" | "description" | "source_url" | "servings" | "prep_minutes" | "cook_minutes" | "ingredients" | "steps" | "tags">;
 
-/**
- * The recipe form. Ingredients and steps are one per line: quick to type,
- * easy to paste from anywhere, and reordering is just moving a line.
- */
-export function RecipeFields({ value }: { value?: Recipe }) {
+/** The recipe form: a saved recipe, an imported one to check over, or blank. */
+export function RecipeFields({ value }: { value?: Draft }) {
   return (
     <div className="flex flex-col gap-5">
       <div className="grid gap-1">
@@ -35,30 +32,21 @@ export function RecipeFields({ value }: { value?: Recipe }) {
           <Input id="cook_minutes" name="cook_minutes" type="number" min={0} inputMode="numeric" defaultValue={value?.cook_minutes ?? ""} />
         </div>
       </div>
-      <div className="grid gap-1">
-        <Label htmlFor="ingredients">Ingredients, one per line</Label>
-        <textarea
-          id="ingredients"
-          name="ingredients"
-          rows={8}
-          defaultValue={value?.ingredients.map(ingredientLine).join("\n")}
-          placeholder={"500g beef mince\n1 onion, finely chopped\n2 cloves garlic, crushed\n1½ cups passata"}
-          className={area}
-        />
-        <p className="text-xs text-muted-foreground">Amount, unit, then the ingredient; anything after a comma is a note.</p>
-      </div>
-      <div className="grid gap-1">
-        <Label htmlFor="steps">Method, one step per line</Label>
-        <textarea
-          id="steps"
-          name="steps"
-          rows={8}
-          defaultValue={value?.steps.map((s) => s.instruction).join("\n")}
-          placeholder={"Brown the mince in a hot pan.\nAdd the onion and garlic; cook for 5 minutes.\nSimmer with the passata for 30 minutes."}
-          className={area}
-        />
-        <p className="text-xs text-muted-foreground">Times like &ldquo;30 minutes&rdquo; become timers in cooking mode.</p>
-      </div>
+      <LineList
+        name="ingredients"
+        legend="Ingredients"
+        initial={value?.ingredients.map(ingredientLine) ?? []}
+        placeholder="500g beef mince"
+        hint="Amount, unit, then the ingredient; anything after a comma is a note. Paste a whole list to fill it in."
+      />
+      <LineList
+        name="steps"
+        legend="Method"
+        multiline
+        initial={value?.steps.map((s) => s.instruction) ?? []}
+        placeholder="Brown the mince in a hot pan."
+        hint="Times like “30 minutes” become timers in cooking mode."
+      />
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-1">
           <Label htmlFor="tags">Tags (optional, comma separated)</Label>

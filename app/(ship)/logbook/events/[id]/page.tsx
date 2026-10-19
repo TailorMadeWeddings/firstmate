@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { CalendarDays, MapPin, Repeat as RepeatIcon } from "lucide-react";
+import { CalendarDays, ChefHat, MapPin, Repeat as RepeatIcon } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
@@ -36,10 +36,14 @@ async function EventDetail({ params, searchParams }: Props) {
   const supabase = await createClient();
   const { data: event } = await supabase
     .from("events")
-    .select("id, title, description, location, start_at, end_at, all_day, recurrence_rule, recurrence_ends_at")
+    .select("id, title, description, location, start_at, end_at, all_day, recurrence_rule, recurrence_ends_at, recipe_id, recipes(title, recipe_steps(count))")
     .eq("id", id)
     .maybeSingle();
   if (!event) notFound();
+  // A meal: the recipe it's for (if it's still in the Galley).
+  const meal = event.recipe_id
+    ? ((event as unknown as { recipes: { title: string; recipe_steps: { count: number }[] } | null }).recipes ?? null)
+    : null;
   // Which occurrence was opened (a repeating event's own start if none).
   const occurrence = at && !Number.isNaN(Date.parse(at)) ? new Date(at).toISOString() : null;
   const [crew, { data: change }, { data: assigned }] = await Promise.all([
@@ -105,6 +109,20 @@ async function EventDetail({ params, searchParams }: Props) {
           </div>
         )}
         {description && <p className="whitespace-pre-wrap text-sm">{description}</p>}
+        {meal && (
+          <div className="flex flex-wrap items-center gap-3 border-t pt-4">
+            {(meal.recipe_steps[0]?.count ?? 0) > 0 && (
+              <Button asChild size="lg">
+                <Link href={`/galley/${event.recipe_id}/cook`}>
+                  <ChefHat aria-hidden /> Cook {meal.title}
+                </Link>
+              </Button>
+            )}
+            <Link href={`/galley/${event.recipe_id}`} className="text-sm font-semibold text-primary hover:underline dark:text-blue-400">
+              See the recipe
+            </Link>
+          </div>
+        )}
       </article>
 
       <details className="rounded-2xl border bg-card p-5">

@@ -1,6 +1,9 @@
 // The Galley's text handling: ingredients and steps are typed (or pasted)
 // one per line, and quantities scale with servings. Pure, so it's testable.
 
+/** The private storage bucket for recipe photos, one folder per recipe. */
+export const PHOTO_BUCKET = "recipe-photos";
+
 export type Ingredient = { quantity: number | null; unit: string | null; name: string; notes: string | null };
 export type Step = { instruction: string; duration_seconds: number | null };
 
@@ -148,22 +151,34 @@ export type RecipeCard = {
   created_at: string;
   tags: string[];
   ingredients: string[];
+  /** Ids of the collections it's in. */
+  collections: string[];
+  /** When it was last cooked, if ever. */
+  cooked_at: string | null;
+  /** A signed link to its photo, if it has one. */
+  photo: string | null;
 };
 
-/**
- * Recipes matching a search (title, description or an ingredient) and a
- * tag, newest first or A–Z.
- * ponytail: filters in memory; fine for a family cookbook of a few hundred
- * recipes. Move to database search (pg_trgm) if it ever gets to thousands.
- */
-export function findRecipes(all: RecipeCard[], q: string, tag: string | null, sort: "new" | "az"): RecipeCard[] {
+export type Sort = "new" | "az" | "cooked";
+
+export function findRecipes(
+  all: RecipeCard[],
+  { q = "", tag = null, collection = null, sort = "new" }: { q?: string; tag?: string | null; collection?: string | null; sort?: Sort },
+): RecipeCard[] {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   const found = all.filter((r) => {
     if (tag && !r.tags.includes(tag)) return false;
+    if (collection && !r.collections.includes(collection)) return false;
     const haystack = [r.title, r.description ?? "", ...r.ingredients].join(" ").toLowerCase();
     return words.every((w) => haystack.includes(w));
   });
-  return found.sort((a, b) => (sort === "az" ? a.title.localeCompare(b.title) : b.created_at.localeCompare(a.created_at)));
+  // Recently cooked first; never-cooked ones after, newest first.
+  const cooked = (r: RecipeCard) => r.cooked_at ?? "";
+  return found.sort((a, b) =>
+    sort === "az"
+      ? a.title.localeCompare(b.title)
+      : (sort === "cooked" ? cooked(b).localeCompare(cooked(a)) : 0) || b.created_at.localeCompare(a.created_at),
+  );
 }
 
 // ---------- cooking-mode timers ----------
@@ -191,4 +206,101 @@ export function clock(ms: number): string {
   const m = Math.floor((s % 3600) / 60);
   const sec = String(s % 60).padStart(2, "0");
   return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+
+// ---------- importing from a recipe website ----------
+// Most recipe sites describe the recipe for search engines as schema.org
+// JSON-LD; reading that beats scraping each site's HTML.
+
+export type Imported = {
+  title: string;
+  description: string | null;
+  source_url: string;
+  servings: number | null;
+  prep_minutes: number | null;
+  cook_minutes: number | null;
+  ingredients: Ingredient[];
+  steps: Step[];
+  tags: string[];
+};
+
+/** "PT1H30M" → 90 */
+export function isoMinutes(value: unknown): number | null {
+  const m = typeof value === "string" && value.match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:[\d.]+S)?)?$/i);
+  if (!m) return null;
+  const total = Number(m[1] ?? 0) * 1440 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0);
+  return total > 0 ? total : null;
+}
+
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", frac12: "½", frac14: "¼", frac34: "¾", deg: "°" };
+
+/** Text as people read it: tags dropped, entities decoded, spaces tidied. */
+function plain(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&(#x?[0-9a-f]+|[a-z]+\d*);/gi, (all, code: string) =>
+      code[0] === "#"
+        ? String.fromCodePoint(code[1].toLowerCase() === "x" ? parseInt(code.slice(2), 16) : Number(code.slice(1)))
+        : (ENTITIES[code.toLowerCase()] ?? all),
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const isRecipe = (node: unknown): node is Record<string, unknown> => {
+  if (!node || typeof node !== "object") return false;
+  const type = (node as Record<string, unknown>)["@type"];
+  return type === "Recipe" || (Array.isArray(type) && type.includes("Recipe"));
+};
+
+/** The first Recipe anywhere in a JSON-LD value (arrays and @graph included). */
+function findRecipe(node: unknown): Record<string, unknown> | null {
+  if (isRecipe(node)) return node;
+  const children = Array.isArray(node) ? node : node && typeof node === "object" ? Object.values(node) : [];
+  for (const child of children) {
+    const found = findRecipe(child);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Steps come as text, a list of text, HowToSteps, or HowToSections of HowToSteps. */
+function stepTexts(value: unknown): string[] {
+  if (typeof value === "string") return plain(value) ? [plain(value)] : [];
+  if (Array.isArray(value)) return value.flatMap(stepTexts);
+  if (value && typeof value === "object") {
+    const v = value as Record<string, unknown>;
+    if (v.itemListElement) return stepTexts(v.itemListElement);
+    return stepTexts(v.text ?? v.name);
+  }
+  return [];
+}
+
+/** A recipe from a web page's schema.org data, or null if it hasn't any. */
+export function recipeFromPage(html: string, url: string): Imported | null {
+  const blocks = html.matchAll(/<script[^>]*type=["']?application\/ld\+json["']?[^>]*>([\s\S]*?)<\/script>/gi);
+  let recipe: Record<string, unknown> | null = null;
+  for (const [, json] of blocks) {
+    try {
+      recipe = findRecipe(JSON.parse(json));
+    } catch {
+      continue;
+    }
+    if (recipe) break;
+  }
+  if (!recipe || !plain(recipe.name)) return null;
+  const servings = [recipe.recipeYield].flat().map((y) => Number(String(y ?? "").match(/\d+/)?.[0])).find((n) => n >= 1 && n <= 100);
+  const list = (v: unknown) => [v].flat().map(plain).filter(Boolean);
+  return {
+    title: plain(recipe.name).slice(0, 200),
+    description: plain(recipe.description).slice(0, 500) || null,
+    source_url: url,
+    servings: servings ?? null,
+    prep_minutes: isoMinutes(recipe.prepTime),
+    cook_minutes: isoMinutes(recipe.cookTime),
+    ingredients: parseIngredients(list(recipe.recipeIngredient).join("\n")),
+    steps: parseSteps(stepTexts(recipe.recipeInstructions).join("\n")),
+    tags: parseTags([...list(recipe.recipeCategory), ...list(recipe.recipeCuisine)].join(",")).slice(0, 5),
+  };
 }
