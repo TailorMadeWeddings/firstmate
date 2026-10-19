@@ -55,3 +55,83 @@ export function forEntry(all: Category[], recentIds: (string | null)[]) {
     (a, b) => rank(a) - rank(b) || label(a, all).localeCompare(label(b, all)),
   );
 }
+
+// ---------- bill schedules ----------
+// ponytail: only "every N weeks / months / years" RRULEs, which is all the
+// bill form makes. Use an RRULE library if bills ever need more.
+
+export const UNITS = { weeks: "WEEKLY", months: "MONTHLY", years: "YEARLY" } as const;
+export type Unit = keyof typeof UNITS;
+
+const parts = (rule: string) =>
+  Object.fromEntries(rule.split(";").map((p) => p.split("="))) as Record<string, string>;
+
+/** RRULE for "every N units", anchored to the first due date's day (and month). */
+export function ruleFor(unit: Unit, interval: number, firstDue: string): string {
+  const [, m, d] = firstDue.split("-").map(Number);
+  let rule = `FREQ=${UNITS[unit]};INTERVAL=${interval}`;
+  if (unit !== "weeks") rule += `;BYMONTHDAY=${d}`;
+  if (unit === "years") rule += `;BYMONTH=${m}`;
+  return rule;
+}
+
+export function scheduleOf(rule: string): { unit: Unit; interval: number } {
+  const p = parts(rule);
+  const unit = (Object.keys(UNITS) as Unit[]).find((u) => UNITS[u] === p.FREQ) ?? "months";
+  return { unit, interval: Number(p.INTERVAL ?? 1) };
+}
+
+export function scheduleLabel(rule: string): string {
+  const { unit, interval } = scheduleOf(rule);
+  if (interval === 1) return { weeks: "Weekly", months: "Monthly", years: "Yearly" }[unit];
+  if (unit === "weeks" && interval === 2) return "Fortnightly";
+  if (unit === "months" && interval === 3) return "Quarterly";
+  return `Every ${interval} ${unit}`;
+}
+
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+const daysIn = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+
+/** The due date after `due`. The 31st falls on the last day of shorter months. */
+export function nextDue(due: string, rule: string): string {
+  const p = parts(rule);
+  const { unit, interval } = scheduleOf(rule);
+  const [y, m, d] = due.split("-").map(Number);
+  if (unit === "weeks") return iso(new Date(Date.UTC(y, m - 1, d + 7 * interval)));
+  const months = unit === "months" ? interval : 12 * interval;
+  const total = y * 12 + (m - 1) + months;
+  const ny = Math.floor(total / 12);
+  const nm = (total % 12) + 1;
+  const day = Math.min(Number(p.BYMONTHDAY ?? d), daysIn(ny, nm));
+  return iso(new Date(Date.UTC(ny, nm - 1, day)));
+}
+
+/** Whole days from today until the date; negative when it's past. */
+export const daysUntil = (date: string, from = today()) =>
+  Math.round((Date.parse(date) - Date.parse(from)) / 86_400_000);
+
+// ---------- savings goals ----------
+
+/**
+ * How a goal is going. Pace assumes saving evenly from when the goal was set
+ * up to its target date; ahead means at or above where that line is today.
+ */
+export function pace(
+  goal: { target_amount: number; target_date: string | null; created_at: string },
+  saved: number,
+  on = today(),
+) {
+  const target = Number(goal.target_amount);
+  const percent = Math.min(100, Math.max(0, Math.round((saved / target) * 100)));
+  if (!goal.target_date || saved >= target) return { percent, ahead: saved >= target, perMonth: null };
+  const start = goal.created_at.slice(0, 10);
+  const total = daysUntil(goal.target_date, start);
+  const left = daysUntil(goal.target_date, on);
+  const expected = total > 0 ? target * Math.min(1, (total - left) / total) : target;
+  const monthsLeft = Math.max(left / 30.44, 1);
+  return {
+    percent,
+    ahead: saved >= expected,
+    perMonth: Math.ceil(((target - saved) / monthsLeft) * 100) / 100,
+  };
+}
