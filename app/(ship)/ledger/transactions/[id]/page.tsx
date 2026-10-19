@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { ActionForm } from "@/components/action-form";
 import { Button } from "@/components/ui/button";
@@ -28,11 +28,13 @@ async function EditTransaction({ params }: { params: Promise<{ id: string }> }) 
     loadCategories(),
     supabase
       .from("budget_transactions")
-      .select("id, date, amount, description, notes, account_id, category_id")
+      .select("id, date, amount, description, notes, account_id, category_id, goal_id")
       .eq("id", id)
       .maybeSingle<Transaction>(),
   ]);
   if (!data) notFound();
+  // Goal contributions are managed on the goal itself.
+  if (data.goal_id) redirect("/ledger/goals");
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">

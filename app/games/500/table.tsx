@@ -1,7 +1,8 @@
 "use client";
 
+import { Bell, BellOff } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { type RoomView } from "@/lib/games/500/room";
 import {
@@ -44,6 +45,33 @@ function bidLabel(b: Bid | "pass") {
   if (b === "OMIS") return "Open misère";
   const t = trumpOf(b);
   return `${parseInt(b)}${t === "NT" ? "NT" : SYMBOL[t]}`;
+}
+
+// Phones only let a page make sound after a tap, so the first tap anywhere unlocks it.
+let audio: AudioContext | null = null;
+const unlockAudio = () => {
+  audio ??= new AudioContext();
+  void audio.resume();
+};
+
+/** A short two-note chime. */
+function chime() {
+  if (!audio) return;
+  const t = audio.currentTime;
+  const osc = audio.createOscillator();
+  const gain = audio.createGain();
+  osc.frequency.setValueAtTime(660, t);
+  osc.frequency.setValueAtTime(880, t + 0.12);
+  gain.gain.setValueAtTime(0.15, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+  osc.connect(gain).connect(audio.destination);
+  osc.start(t);
+  osc.stop(t + 0.35);
+}
+
+function cardName(c: Card) {
+  if (c === JOKER) return "the joker";
+  return `${rankOf(c) === "T" ? "10" : rankOf(c)}${SYMBOL[c[1] as Suit]}`;
 }
 
 function sortHand(hand: Card[], trump: Trump) {
@@ -109,6 +137,8 @@ export function Table({
 }) {
   const [discards, setDiscards] = useState<Card[]>([]);
   const [namingJoker, setNamingJoker] = useState(false);
+  // First tap lifts a card, a second tap plays it, so a slip doesn't throw a card away.
+  const [selected, setSelected] = useState<Card | null>(null);
   const game = view.game!;
   const { phase, contract, turn } = game;
 
@@ -120,20 +150,64 @@ export function Table({
     act(action);
     setDiscards([]);
     setNamingJoker(false);
+    setSelected(null);
   };
 
   const trump: Trump = contract && phase !== "bidding" ? trumpOf(contract.bid) : "NT";
   const active = ["bidding", "kitty", "playing"].includes(phase);
-  const myTurn = active && turn === view.seat && !busy;
+  const myMove = active && turn === view.seat;
+  const myTurn = myMove && !busy;
+
+  // Let people know when the turn comes round to them.
+  const [muted, setMuted] = useState(false);
+  useEffect(() => {
+    try {
+      setMuted(localStorage.getItem("500-muted") === "1");
+    } catch {}
+    document.addEventListener("pointerdown", unlockAudio);
+    return () => document.removeEventListener("pointerdown", unlockAudio);
+  }, []);
+  const toggleMuted = () => {
+    setMuted(!muted);
+    try {
+      localStorage.setItem("500-muted", muted ? "0" : "1");
+    } catch {}
+  };
+  const wasMyMove = useRef(myMove);
+  useEffect(() => {
+    if (myMove && !wasMyMove.current) {
+      if (!muted) chime();
+      navigator.vibrate?.(150);
+    }
+    wasMyMove.current = myMove;
+  }, [myMove, muted]);
+  useEffect(() => {
+    if (!myMove) return;
+    const title = document.title;
+    document.title = `Your turn · ${title}`;
+    return () => {
+      document.title = title;
+    };
+  }, [myMove]);
   const legal = phase === "playing" && myTurn ? legalPlays(game.hand, trump, game.led) : [];
-  const shown = game.trick.length ? game.trick : (game.lastTrick?.plays ?? []);
-  const trickWonBy = game.trick.length ? null : (game.lastTrick?.winner ?? null);
+  // Mid-trick, "Last trick" shows the one before. It's keyed to the trick it was
+  // opened on, so it closes by itself once that trick is over.
+  const trickId = `${game.history.length}.${game.tricks.reduce((a, b) => a + b, 0)}`;
+  const [peekAt, setPeekAt] = useState<string | null>(null);
+  const canPeek = game.trick.length > 0 && game.lastTrick !== null;
+  const peeking = canPeek && peekAt === trickId;
+  const shown =
+    game.trick.length && !peeking ? game.trick : (game.lastTrick?.plays ?? []);
+  const trickWonBy =
+    game.trick.length && !peeking ? null : (game.lastTrick?.winner ?? null);
 
   function onCard(card: Card) {
     if (phase === "kitty") {
       setDiscards((d) =>
         d.includes(card) ? d.filter((c) => c !== card) : d.length < 3 ? [...d, card] : d,
       );
+    } else if (card !== selected) {
+      setSelected(card);
     } else if (card === JOKER && trump === "NT" && !game.trick.length) {
       setNamingJoker(true);
     } else {
@@ -168,9 +242,21 @@ export function Table({
           </Link>
           <h1 className="text-2xl font-bold">Game {view.code}</h1>
         </div>
-        <p className="text-sm tabular-nums">
-          Us <b>{game.scores[myTeam]}</b> · Them <b>{game.scores[1 - myTeam]}</b>
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm tabular-nums">
+            Us <b>{game.scores[myTeam]}</b> · Them <b>{game.scores[1 - myTeam]}</b>
+          </p>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            aria-label={muted ? "Turn sound on" : "Turn sound off"}
+            title={muted ? "Turn sound on" : "Turn sound off"}
+            onClick={toggleMuted}
+          >
+            {muted ? <BellOff /> : <Bell />}
+          </Button>
+        </div>
       </header>
 
       <section
@@ -216,7 +302,21 @@ export function Table({
                     ? "No trumps"
                     : `${SYMBOL[trump]} trumps`}
               </div>
-              {game.led && <div className="opacity-75">Follow {SYMBOL[game.led]}</div>}
+              {peeking ? (
+                <div className="opacity-75">Last trick</div>
+              ) : (
+                game.led && <div className="opacity-75">Follow {SYMBOL[game.led]}</div>
+              )}
+              {canPeek && (
+                <button
+                  type="button"
+                  aria-pressed={peeking}
+                  className="mt-1 text-xs underline underline-offset-2 opacity-75 hover:opacity-100"
+                  onClick={() => setPeekAt(peeking ? null : trickId)}
+                >
+                  {peeking ? "Back to this trick" : "Last trick"}
+                </button>
+              )}
             </>
           ) : (
             <div className="opacity-75">Bidding</div>
@@ -349,7 +449,11 @@ export function Table({
           ) : (
             <p className={cn(!myTurn && "text-muted-foreground")}>
               {trickWonBy !== null && `${nameOf(trickWonBy)} won the trick. `}
-              {turn === view.seat ? "Your turn." : `${nameOf(turn)} to play…`}
+              {turn !== view.seat
+                ? `${nameOf(turn)} to play…`
+                : selected
+                  ? `Tap ${cardName(selected)} again to play it.`
+                  : "Your turn. Tap a card to pick it."}
             </p>
           ))}
       </section>
@@ -363,12 +467,75 @@ export function Table({
               key={c}
               card={c}
               dim={phase === "playing" && myTurn && !legal.includes(c)}
-              raised={discarding ? discards.includes(c) : undefined}
+              raised={
+                discarding ? discards.includes(c) : playable ? selected === c : undefined
+              }
               onClick={playable || discarding ? () => onCard(c) : undefined}
             />
           );
         })}
       </section>
+
+      {game.history.length > 0 && <ScoreHistory game={game} myTeam={myTeam} nameOf={nameOf} />}
     </main>
+  );
+}
+
+function ScoreHistory({
+  game,
+  myTeam,
+  nameOf,
+}: {
+  game: NonNullable<RoomView["game"]>;
+  myTeam: number;
+  nameOf: (seat: number) => string;
+}) {
+  const totals = [0, 0];
+  const rows = game.history.map((h) => {
+    totals[0] += h.points[0];
+    totals[1] += h.points[1];
+    return { h, us: totals[myTeam], them: totals[1 - myTeam] };
+  });
+  const n = rows.length;
+  return (
+    <details className="rounded-xl border px-3 py-2 text-sm">
+      <summary className="cursor-pointer select-none">
+        Scores · {n} hand{n === 1 ? "" : "s"} played
+      </summary>
+      <table className="mt-2 w-full tabular-nums">
+        <thead className="text-left text-xs text-muted-foreground">
+          <tr>
+            <th className="py-1 font-normal">Bid</th>
+            <th className="py-1 text-right font-normal">Us</th>
+            <th className="py-1 text-right font-normal">Them</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ h, us, them }, i) => (
+            <tr key={i} className="border-t">
+              <td className="py-1">
+                {nameOf(h.seat)} {bidLabel(h.bid)}{" "}
+                <span className={h.made ? "text-emerald-700" : "text-red-600"}>
+                  {h.made ? "made" : "down"}
+                </span>{" "}
+                <span className="text-muted-foreground">
+                  · {h.tricks} trick{h.tricks === 1 ? "" : "s"}
+                </span>
+              </td>
+              <td className="py-1 text-right">
+                <span className="text-xs text-muted-foreground">{signed(h.points[myTeam])}</span>{" "}
+                <b>{us}</b>
+              </td>
+              <td className="py-1 text-right">
+                <span className="text-xs text-muted-foreground">
+                  {signed(h.points[1 - myTeam])}
+                </span>{" "}
+                <b>{them}</b>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
   );
 }

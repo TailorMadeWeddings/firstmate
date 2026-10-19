@@ -1,7 +1,21 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
-import { type Category, forEntry, label, today } from "@/lib/ledger";
+import { ActionForm } from "@/components/action-form";
+import { Button } from "@/components/ui/button";
+import {
+  type Category,
+  UNITS,
+  type Unit,
+  daysUntil,
+  forEntry,
+  label,
+  money,
+  scheduleLabel,
+  scheduleOf,
+  today,
+} from "@/lib/ledger";
+import { payBill } from "./actions";
 import { createClient } from "@/lib/supabase/server";
 
 export type Account = {
@@ -20,6 +34,30 @@ export type Transaction = {
   notes: string | null;
   account_id: string;
   category_id: string | null;
+  goal_id: string | null;
+};
+
+export type Bill = {
+  id: string;
+  name: string;
+  amount: number;
+  recurrence_rule: string;
+  next_due: string;
+  last_paid: string | null;
+  category_id: string | null;
+  account_id: string | null;
+  autopay: boolean;
+};
+
+export type Goal = {
+  id: string;
+  name: string;
+  target_amount: number;
+  starting_amount: number;
+  target_date: string | null;
+  account_id: string | null;
+  completed_at: string | null;
+  created_at: string;
 };
 
 const must = <T,>({ data, error }: { data: T | null; error: unknown }): T => {
@@ -44,6 +82,156 @@ export async function loadCategories() {
       .from("budget_categories")
       .select("id, name, type, parent_category_id, archived_at, color, icon")
       .order("name"),
+  );
+}
+
+export async function loadBills() {
+  const supabase = await createClient();
+  return must<Bill[]>(
+    await supabase
+      .from("budget_recurring_bills")
+      .select("id, name, amount, recurrence_rule, next_due, last_paid, category_id, account_id, autopay")
+      .order("next_due"),
+  );
+}
+
+export async function loadGoals() {
+  const supabase = await createClient();
+  return must<Goal[]>(
+    await supabase
+      .from("budget_savings_goals")
+      .select("id, name, target_amount, starting_amount, target_date, account_id, completed_at, created_at")
+      .order("created_at"),
+  );
+}
+
+/** "Overdue 3 days", "Due today", "Due in 5 days" */
+export function dueLabel(date: string) {
+  const days = daysUntil(date);
+  if (days < 0) return `Overdue ${-days} day${days === -1 ? "" : "s"}`;
+  if (days === 0) return "Due today";
+  return `Due in ${days} day${days === 1 ? "" : "s"}`;
+}
+
+/** One bill with its due date, and a form to record paying it. */
+export function BillRow({ bill, children }: { bill: Bill; children?: React.ReactNode }) {
+  const overdue = daysUntil(bill.next_due) < 0;
+  return (
+    <div className={`flex flex-col gap-2 px-4 py-3 ${overdue ? "bg-red-50 dark:bg-red-950/40" : ""}`}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4">
+        <span className="font-medium">
+          {bill.name}
+          {bill.autopay && <span className="ml-2 text-xs text-muted-foreground">auto-pay</span>}
+        </span>
+        <span className="tabular-nums">{money(bill.amount)}</span>
+        <span
+          className={`basis-full text-xs ${overdue ? "font-semibold text-red-600" : "text-muted-foreground"}`}
+        >
+          {dueLabel(bill.next_due)} · {bill.next_due} · {scheduleLabel(bill.recurrence_rule)}
+        </span>
+      </div>
+      <ActionForm action={payBill.bind(null, bill.id)} className="flex flex-wrap items-end gap-2">
+        <input type="hidden" name="due" value={bill.next_due} />
+        <Input
+          name="amount"
+          aria-label="Amount paid"
+          inputMode="decimal"
+          defaultValue={Number(bill.amount).toFixed(2)}
+          className="w-28"
+        />
+        <Input name="paid_on" aria-label="Paid on" type="date" defaultValue={today()} className="w-40" />
+        <Button size="sm" variant="secondary">
+          Mark paid
+        </Button>
+      </ActionForm>
+      {children}
+    </div>
+  );
+}
+
+/** Fields for adding or editing a bill. */
+export function BillFields({
+  accounts,
+  categories,
+  value,
+}: {
+  accounts: Account[];
+  categories: Category[];
+  value?: Bill;
+}) {
+  const schedule = value ? scheduleOf(value.recurrence_rule) : { unit: "months" as Unit, interval: 1 };
+  const expenses = forEntry(categories, []).filter((c) => c.type === "expense");
+  const id = (name: string) => `${name}-${value?.id ?? "new"}`;
+  return (
+    <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-1">
+        <Label htmlFor={id("name")}>Name</Label>
+        <Input id={id("name")} name="name" placeholder="Electricity" defaultValue={value?.name} required />
+      </div>
+      <div className="grid gap-1">
+        <Label htmlFor={id("amount")}>Usual amount</Label>
+        <Input
+          id={id("amount")}
+          name="amount"
+          inputMode="decimal"
+          placeholder="0.00"
+          defaultValue={value ? Number(value.amount).toFixed(2) : undefined}
+          required
+        />
+      </div>
+      <div className="grid gap-1">
+        <Label htmlFor={id("next_due")}>Next due</Label>
+        <Input id={id("next_due")} name="next_due" type="date" defaultValue={value?.next_due} required />
+      </div>
+      <div className="grid gap-1">
+        <Label htmlFor={id("interval")}>Repeats every</Label>
+        <div className="flex gap-2">
+          <Input
+            id={id("interval")}
+            name="interval"
+            type="number"
+            min={1}
+            max={52}
+            defaultValue={schedule.interval}
+            className="w-20"
+          />
+          <NativeSelect name="unit" aria-label="Unit" defaultValue={schedule.unit}>
+            {(Object.keys(UNITS) as Unit[]).map((u) => (
+              <option key={u} value={u}>
+                {u}
+              </option>
+            ))}
+          </NativeSelect>
+        </div>
+      </div>
+      <div className="grid gap-1">
+        <Label htmlFor={id("category")}>Category</Label>
+        <NativeSelect id={id("category")} name="category_id" defaultValue={value?.category_id ?? ""} required>
+          <option value="" disabled>
+            Choose…
+          </option>
+          {expenses.map((c) => (
+            <option key={c.id} value={c.id}>
+              {label(c, categories)}
+            </option>
+          ))}
+        </NativeSelect>
+      </div>
+      <div className="grid gap-1">
+        <Label htmlFor={id("account")}>Paid from</Label>
+        <NativeSelect id={id("account")} name="account_id" defaultValue={value?.account_id ?? undefined}>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </NativeSelect>
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="autopay" defaultChecked={value?.autopay} className="size-4" />
+        Paid automatically by the bank
+      </label>
+    </div>
   );
 }
 

@@ -32,6 +32,8 @@ const HOME = "10000000-0000-0000-0000-000000000001";
 const OTHER_HOME = "10000000-0000-0000-0000-000000000002";
 const ACCOUNT = "20000000-0000-0000-0000-000000000001";
 const CATEGORY = "30000000-0000-0000-0000-000000000001";
+const BILL = "40000000-0000-0000-0000-000000000001";
+const GOAL = "50000000-0000-0000-0000-000000000001";
 
 const TABLES = [
   "budget_accounts",
@@ -40,6 +42,7 @@ const TABLES = [
   "budget_recurring_bills",
   "budget_savings_goals",
   "budget_account_balances",
+  "budget_goal_progress",
 ];
 
 async function setup() {
@@ -63,10 +66,10 @@ async function setup() {
       ('${CATEGORY}', '${HOME}', 'Groceries', 'expense');
     insert into budget_transactions (household_id, account_id, category_id, date, amount, description, created_by)
       values ('${HOME}', '${ACCOUNT}', '${CATEGORY}', '2026-10-18', -84.20, 'Woolworths', '${OWNER}');
-    insert into budget_recurring_bills (household_id, name, amount, recurrence_rule, next_due)
-      values ('${HOME}', 'Electricity', 210, 'FREQ=MONTHLY;BYMONTHDAY=15', '2026-11-15');
-    insert into budget_savings_goals (household_id, name, target_amount)
-      values ('${HOME}', 'Holiday', 5000);
+    insert into budget_recurring_bills (id, household_id, name, amount, recurrence_rule, next_due, account_id, category_id)
+      values ('${BILL}', '${HOME}', 'Electricity', 210, 'FREQ=MONTHLY;BYMONTHDAY=15', '2026-11-15', '${ACCOUNT}', '${CATEGORY}');
+    insert into budget_savings_goals (id, household_id, name, target_amount, starting_amount)
+      values ('${GOAL}', '${HOME}', 'Holiday', 5000, 400);
   `);
   return db;
 }
@@ -171,6 +174,43 @@ test("ledger: balance is the opening balance plus transactions", async () => {
     return (await tx.query<{ balance: string }>("select balance from budget_account_balances")).rows;
   });
   assert.deepEqual(balance, [{ balance: "931.50" }]);
+});
+
+test("ledger: paying a bill records it once and moves the due date on", async () => {
+  const db = await setup();
+  const pay = (tx: Transaction) =>
+    tx.query(`select budget_pay_bill('${BILL}', '2026-11-15', '2026-12-15', '2026-11-14', 223.40)`);
+  const after = await as(db, OWNER, async (tx) => {
+    await pay(tx);
+    const bill = (await tx.query("select next_due::text, last_paid::text from budget_recurring_bills")).rows;
+    const paid = (await tx.query("select amount::text, description from budget_transactions where description = 'Electricity'")).rows;
+    // The second tap of a double click finds the bill already moved on.
+    const again = await tx.query("savepoint s").then(() => pay(tx)).then(() => "paid twice", (e: Error) => e.message);
+    return { bill, paid, again };
+  });
+  assert.deepEqual(after.bill, [{ next_due: "2026-12-15", last_paid: "2026-11-14" }]);
+  assert.deepEqual(after.paid, [{ amount: "-223.40", description: "Electricity" }]);
+  assert.match(after.again, /already paid/);
+  // Non-owners can't see the bill, so can't pay it.
+  await assert.rejects(as(db, TRUSTED, pay), /already paid/);
+});
+
+test("ledger: goal progress is the starting amount plus contributions", async () => {
+  const db = await setup();
+  const saved = await as(db, OWNER, async (tx) => {
+    await tx.query(`insert into budget_transactions (household_id, account_id, goal_id, date, amount)
+                    values ('${HOME}', '${ACCOUNT}', '${GOAL}', '2026-10-19', 250)`);
+    return (await tx.query<{ saved: string }>("select saved::text from budget_goal_progress")).rows;
+  });
+  assert.deepEqual(saved, [{ saved: "650.00" }]);
+  await assert.rejects(
+    as(db, OWNER, async (tx) => {
+      await tx.query(`insert into budget_transactions (household_id, account_id, goal_id, date, amount)
+                      values ('${HOME}', '${ACCOUNT}', '${GOAL}', '2026-10-19', 250)`);
+      await tx.query(`delete from budget_savings_goals where id = '${GOAL}'`);
+    }),
+    /foreign key/,
+  );
 });
 
 test("ledger: constraints", async () => {
