@@ -1,4 +1,6 @@
+import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
+import { type Unlock, readUnlock } from "@/lib/kitchen";
 import { createClient } from "@/lib/supabase/server";
 
 export type Member = {
@@ -25,10 +27,45 @@ export async function currentMember(): Promise<Member> {
   return { id, householdId: member.household_id, role: member.role };
 }
 
-/** Owners only. Anyone else gets a 404, so they don't learn the page exists. */
+// ---------- the kitchen screen (The Helm) ----------
+// Both cookies are httpOnly and set only by server actions, so page scripts
+// can't fake them; the unlock is also signed and expires on its own.
+
+export const KITCHEN_COOKIE = "fm_kitchen";
+export const UNLOCK_COOKIE = "fm_unlock";
+
+/** Signs unlock cookies. Server-only, like the key itself. */
+export function unlockKey(): string {
+  const key = process.env.SUPABASE_SECRET_KEY;
+  if (!key) throw new Error("SUPABASE_SECRET_KEY is not set");
+  return key;
+}
+
+/** Whether this device is the kitchen screen, and who unlocked it (if anyone, still in time). */
+export async function kitchenState(member: Member): Promise<{ kitchen: boolean; unlock: Unlock | null }> {
+  const jar = await cookies();
+  const kitchen = jar.get(KITCHEN_COOKIE)?.value === "1";
+  const unlock = kitchen
+    ? readUnlock(jar.get(UNLOCK_COOKIE)?.value, unlockKey(), { u: member.id, h: member.householdId })
+    : null;
+  return { kitchen, unlock };
+}
+
+/** The Ledger is for owners, and on the kitchen screen only while a PIN has unlocked it. */
+export async function canSeeLedger(member: Member): Promise<boolean> {
+  if (member.role !== "owner") return false;
+  const { kitchen, unlock } = await kitchenState(member);
+  return !kitchen || unlock !== null;
+}
+
+/**
+ * Owners only: anyone else gets a 404, so they don't learn the page exists.
+ * On a locked kitchen screen even owners are sent to the PIN prompt first.
+ */
 export async function currentOwner(): Promise<Member> {
   const member = await currentMember();
   if (member.role !== "owner") notFound();
+  if (!(await canSeeLedger(member))) redirect("/unlock?next=/ledger");
   return member;
 }
 

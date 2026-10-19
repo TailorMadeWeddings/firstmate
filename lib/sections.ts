@@ -9,5 +9,6 @@ export const sections = [
 
 export type Section = (typeof sections)[number];
 
-export const visibleTo = (role: string) =>
-  sections.filter((s) => !("ownersOnly" in s) || role === "owner");
+/** The sections to show; the Ledger only when canSeeLedger says so. */
+export const visibleSections = (showLedger: boolean) =>
+  sections.filter((s) => !("ownersOnly" in s) || showLedger);
