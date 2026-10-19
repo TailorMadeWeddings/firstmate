@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   durationIn,
+  findRecipes,
   formatQuantity,
   ingredientLine,
   minutes,
@@ -70,4 +71,22 @@ test("tags and times", () => {
   assert.equal(minutes(20), "20 min");
   assert.equal(minutes(120), "2 hr");
   assert.equal(minutes(0), null);
+});
+
+test("finding recipes by words, ingredient and tag", () => {
+  const card = (title: string, created_at: string, tags: string[], ingredients: string[]) => ({
+    id: title, title, description: null, servings: 4, prep_minutes: null, cook_minutes: null, created_at, tags, ingredients,
+  });
+  const all = [
+    card("Pavlova", "2026-10-01", ["dessert"], ["egg whites", "caster sugar"]),
+    card("Spaghetti bolognese", "2026-10-03", ["quick", "kid-friendly"], ["beef mince", "spaghetti"]),
+    card("Egg fried rice", "2026-10-02", ["quick"], ["rice", "eggs"]),
+  ];
+  const titles = (q: string, tag: string | null = null, sort: "new" | "az" = "new") => findRecipes(all, q, tag, sort).map((r) => r.title);
+  assert.deepEqual(titles(""), ["Spaghetti bolognese", "Egg fried rice", "Pavlova"]);
+  assert.deepEqual(titles("", null, "az"), ["Egg fried rice", "Pavlova", "Spaghetti bolognese"]);
+  assert.deepEqual(titles("egg"), ["Egg fried rice", "Pavlova"]); // title, or an ingredient
+  assert.deepEqual(titles("MINCE spag"), ["Spaghetti bolognese"]);
+  assert.deepEqual(titles("", "quick"), ["Spaghetti bolognese", "Egg fried rice"]);
+  assert.deepEqual(titles("pav", "quick"), []);
 });

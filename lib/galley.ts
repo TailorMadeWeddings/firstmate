@@ -126,3 +126,33 @@ export function minutes(total: number | null): string | null {
   const m = total % 60;
   return [h ? `${h} hr` : "", m ? `${m} min` : ""].filter(Boolean).join(" ");
 }
+
+// ---------- browsing ----------
+
+export type RecipeCard = {
+  id: string;
+  title: string;
+  description: string | null;
+  servings: number | null;
+  prep_minutes: number | null;
+  cook_minutes: number | null;
+  created_at: string;
+  tags: string[];
+  ingredients: string[];
+};
+
+/**
+ * Recipes matching a search (title, description or an ingredient) and a
+ * tag, newest first or A–Z.
+ * ponytail: filters in memory; fine for a family cookbook of a few hundred
+ * recipes. Move to database search (pg_trgm) if it ever gets to thousands.
+ */
+export function findRecipes(all: RecipeCard[], q: string, tag: string | null, sort: "new" | "az"): RecipeCard[] {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const found = all.filter((r) => {
+    if (tag && !r.tags.includes(tag)) return false;
+    const haystack = [r.title, r.description ?? "", ...r.ingredients].join(" ").toLowerCase();
+    return words.every((w) => haystack.includes(w));
+  });
+  return found.sort((a, b) => (sort === "az" ? a.title.localeCompare(b.title) : b.created_at.localeCompare(a.created_at)));
+}
