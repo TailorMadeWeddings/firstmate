@@ -26,6 +26,7 @@ import {
 import { cn } from "@/lib/utils";
 import { createGame } from "./actions";
 import "./cards.css";
+import { CourtArt } from "./court";
 
 const SYMBOL: Record<Suit, string> = { S: "♠", C: "♣", D: "♦", H: "♥" };
 const SUIT_NAME: Record<Suit, string> = { S: "spades", C: "clubs", D: "diamonds", H: "hearts" };
@@ -149,8 +150,8 @@ export function PlayingCard({
         className,
       )}
     >
-      <span className="absolute left-1 top-1">{corner}</span>
-      <span className="absolute bottom-1 right-1 rotate-180">{corner}</span>
+      <span className="absolute left-1 top-1 z-10">{corner}</span>
+      <span className="absolute bottom-1 right-1 z-10 rotate-180">{corner}</span>
       <span className="absolute inset-0 flex items-center justify-center">
         {joker ? (
           <span className="flex flex-col items-center leading-none">
@@ -169,19 +170,8 @@ export function PlayingCard({
             <span className="text-[8px] font-bold tracking-widest">JOKER</span>
           </span>
         ) : face ? (
-          <span
-            className={cn(
-              "flex h-12 w-8 flex-col items-center justify-center rounded border border-amber-400/80 bg-gradient-to-b font-serif leading-none shadow-inner",
-              isRed(suit) ? "from-rose-50 to-amber-50" : "from-slate-100 to-amber-50",
-            )}
-          >
-            {rank !== "J" && (
-              <svg viewBox="0 0 24 14" className="mb-0.5 h-2 w-4 text-amber-500" aria-hidden>
-                <path d="M2 13 1 3l6 5 5-7 5 7 6-5-1 10z" fill="currentColor" />
-              </svg>
-            )}
-            <span className="text-xl font-bold">{rank}</span>
-            <span className="text-sm">{pip}</span>
+          <span className="absolute inset-x-3 inset-y-1.5">
+            <CourtArt rank={rank as "J" | "Q" | "K"} suit={suit} />
           </span>
         ) : (
           <span className={rank === "A" ? "text-4xl" : "text-3xl"}>{pip}</span>
@@ -192,7 +182,18 @@ export function PlayingCard({
 }
 
 /** Face-down cards fanned out, one per card a player is holding. */
-function CardFan({ count, dim, place }: { count: number; dim?: boolean; place: number }) {
+function CardFan({
+  count,
+  dim,
+  place,
+  fresh,
+}: {
+  count: number;
+  dim?: boolean;
+  place: number;
+  /** Whether card i arrived while you were watching, so gets dealt in. */
+  fresh: (i: number) => boolean;
+}) {
   const [dx, dy] = DIRS[place];
   return (
     <div
@@ -203,7 +204,7 @@ function CardFan({ count, dim, place }: { count: number; dim?: boolean; place: n
       {Array.from({ length: count }, (_, i) => (
         <div
           key={i}
-          className={cn("card-back deal-in h-7 w-5 rounded-sm", i > 0 && "-ml-3.5")}
+          className={cn("card-back h-7 w-5 rounded-sm", fresh(i) && "deal-in", i > 0 && "-ml-3.5")}
           style={
             { "--i": i, "--deal-x": `${-dx * 7}rem`, "--deal-y": `${-dy * 7}rem` } as React.CSSProperties
           }
@@ -293,6 +294,23 @@ export function Table({
   const shown = between ? (game.lastTrick?.plays ?? []) : trickNow;
   const trickWonBy = between ? (game.lastTrick?.winner ?? null) : null;
   const place = (seat: number) => (seat - me + 4) % 4;
+
+  // Whatever is already on the table when the page opens stays put; only what
+  // happens while you watch is animated. Keys name the deal and the trick, so
+  // the same card in a later hand counts as new.
+  const dealId = `${game.history.length}-${game.dealer}`;
+  const trickNo = game.tricks.reduce((a, b) => a + b, 0) - (between ? 1 : 0);
+  const trickKey = (card: Card) => `${game.history.length}.${trickNo}:${card}`;
+  const fanKey = (seat: number, i: number) => `${dealId}:${seat}:${i}`;
+  const [onArrival] = useState(
+    () =>
+      new Set([
+        ...game.hand.map((c) => `${dealId}:${c}`),
+        ...shown.map((p) => trickKey(p.card)),
+        ...game.counts.flatMap((n, seat) => Array.from({ length: n }, (_, i) => fanKey(seat, i))),
+      ]),
+  );
+  const fresh = (key: string) => !onArrival.has(key);
 
   function onCard(card: Card) {
     if (phase === "kitty") {
@@ -399,7 +417,12 @@ export function Table({
             className={cn("absolute flex flex-col items-center gap-1", SEAT_PLACES[place(seat)])}
           >
             {seat !== view.seat && (
-              <CardFan count={game.counts[seat]} dim={sitsOut(game, seat)} place={place(seat)} />
+              <CardFan
+                count={game.counts[seat]}
+                dim={sitsOut(game, seat)}
+                place={place(seat)}
+                fresh={(i) => fresh(fanKey(seat, i))}
+              />
             )}
             <div
               className={cn(
@@ -426,8 +449,8 @@ export function Table({
               <PlayingCard
                 card={card}
                 className={cn(
-                  !peeking && "card-in",
-                  !peeking && between && "trick-out",
+                  fresh(trickKey(card)) && !peeking && "card-in",
+                  fresh(trickKey(card)) && !peeking && between && "trick-out",
                   trickWonBy === seat && "ring-2 ring-amber-300",
                 )}
                 style={
@@ -596,7 +619,7 @@ export function Table({
           return (
             <div
               key={c}
-              className="deal-in"
+              className={cn(fresh(`${dealId}:${c}`) && "deal-in")}
               style={
                 {
                   "--i": i,
