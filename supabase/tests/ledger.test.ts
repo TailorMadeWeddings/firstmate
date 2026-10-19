@@ -43,6 +43,7 @@ const TABLES = [
   "budget_savings_goals",
   "budget_account_balances",
   "budget_goal_progress",
+  "budget_monthly_totals",
 ];
 
 async function setup() {
@@ -211,6 +212,27 @@ test("ledger: goal progress is the starting amount plus contributions", async ()
     }),
     /foreign key/,
   );
+});
+
+test("ledger: monthly totals split money in and out, and skip goal savings", async () => {
+  const db = await setup();
+  const rows = await as(db, OWNER, async (tx) => {
+    await tx.query(`insert into budget_transactions (household_id, account_id, category_id, date, amount) values
+      ('${HOME}', '${ACCOUNT}', '${CATEGORY}', '2026-10-02', -15.80),
+      ('${HOME}', '${ACCOUNT}', '${CATEGORY}', '2026-10-31', 4.20),
+      ('${HOME}', '${ACCOUNT}', null, '2026-09-30', 3000)`);
+    await tx.query(`insert into budget_transactions (household_id, account_id, goal_id, date, amount)
+                    values ('${HOME}', '${ACCOUNT}', '${GOAL}', '2026-10-05', 500)`);
+    return (
+      await tx.query(
+        "select month::text, category_id, money_in::text, money_out::text, transactions from budget_monthly_totals order by month, category_id",
+      )
+    ).rows;
+  });
+  assert.deepEqual(rows, [
+    { month: "2026-09-01", category_id: null, money_in: "3000.00", money_out: "0", transactions: 1 },
+    { month: "2026-10-01", category_id: CATEGORY, money_in: "4.20", money_out: "100.00", transactions: 3 },
+  ]);
 });
 
 test("ledger: constraints", async () => {

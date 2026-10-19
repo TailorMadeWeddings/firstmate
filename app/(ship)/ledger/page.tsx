@@ -59,7 +59,7 @@ async function LedgerHome() {
       <header className="flex items-baseline justify-between gap-4">
         <h1 className="text-3xl font-bold">Ledger</h1>
         <nav className="flex gap-4 text-sm">
-          {["bills", "goals", "categories"].map((page) => (
+          {["reports", "bills", "goals", "categories"].map((page) => (
             <Link key={page} href={`/ledger/${page}`} className="capitalize hover:underline">
               {page}
             </Link>

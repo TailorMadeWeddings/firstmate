@@ -135,3 +135,90 @@ export function pace(
     perMonth: Math.ceil(((target - saved) / monthsLeft) * 100) / 100,
   };
 }
+
+// ---------- reports ----------
+
+/** "2026-10" plus n months. */
+export function addMonths(month: string, n: number): string {
+  const [y, m] = month.split("-").map(Number);
+  const total = y * 12 + (m - 1) + n;
+  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, "0")}`;
+}
+
+const monthsFrom = (from: string, to: string) => {
+  const out = [from];
+  while (out[out.length - 1] < to) out.push(addMonths(out[out.length - 1], 1));
+  return out;
+};
+
+export type Period = { from: string; to: string; months: string[]; previous: { from: string; to: string } };
+
+/**
+ * The months a report covers, from ?from=YYYY-MM&to=YYYY-MM. Anything
+ * missing or malformed falls back to this month; a backwards range is
+ * swapped. "previous" is the same number of months just before.
+ */
+export function period(from?: string, to?: string, now = today()): Period {
+  const valid = (s?: string) => (s && /^\d{4}-(0[1-9]|1[0-2])$/.test(s) ? s : null);
+  const current = now.slice(0, 7);
+  let a = valid(from) ?? valid(to) ?? current;
+  let b = valid(to) ?? a;
+  if (a > b) [a, b] = [b, a];
+  const months = monthsFrom(a, b).slice(-120); // ponytail: at most ten years
+  a = months[0];
+  return { from: a, to: b, months, previous: { from: addMonths(a, -months.length), to: addMonths(a, -1) } };
+}
+
+export type MonthlyTotal = {
+  month: string; // YYYY-MM-01, as the view returns it
+  category_id: string | null;
+  money_in: number;
+  money_out: number;
+};
+
+const inRange = (r: MonthlyTotal, from: string, to: string) =>
+  r.month.slice(0, 7) >= from && r.month.slice(0, 7) <= to;
+
+export function totals(rows: MonthlyTotal[], from: string, to: string) {
+  let moneyIn = 0;
+  let moneyOut = 0;
+  for (const r of rows) {
+    if (!inRange(r, from, to)) continue;
+    moneyIn += Number(r.money_in);
+    moneyOut += Number(r.money_out);
+  }
+  // Round once at the end so floating point never shows up as 0.30000000000000004.
+  const cents = (n: number) => Math.round(n * 100) / 100;
+  return { moneyIn: cents(moneyIn), moneyOut: cents(moneyOut), net: cents(moneyIn - moneyOut) };
+}
+
+/**
+ * Spending per top-level category (sub-categories roll up into their
+ * parent), biggest first. Uncategorised spending has id null.
+ */
+export function spendingByCategory(rows: MonthlyTotal[], categories: Category[], from: string, to: string) {
+  const topOf = (id: string | null) => {
+    const c = categories.find((x) => x.id === id);
+    return c?.parent_category_id ?? id;
+  };
+  const sums = new Map<string | null, number>();
+  for (const r of rows) {
+    if (!inRange(r, from, to) || !Number(r.money_out)) continue;
+    const top = topOf(r.category_id);
+    sums.set(top, (sums.get(top) ?? 0) + Number(r.money_out));
+  }
+  return [...sums]
+    .map(([id, amount]) => ({ id, amount: Math.round(amount * 100) / 100 }))
+    .sort((a, b) => b.amount - a.amount);
+}
+
+/** Money in and out for each month, oldest first. */
+export function monthly(rows: MonthlyTotal[], months: string[]) {
+  return months.map((month) => ({ month, ...totals(rows, month, month) }));
+}
+
+/** A category and its sub-categories, for drilling into a report. */
+export const withChildren = (id: string, categories: Category[]) => [
+  id,
+  ...categories.filter((c) => c.parent_category_id === id).map((c) => c.id),
+];
