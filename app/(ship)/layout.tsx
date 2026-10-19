@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import Link from "next/link";
 import { Suspense } from "react";
 import { LogoutButton } from "@/components/logout-button";
@@ -30,8 +29,6 @@ export default function ShipLayout({ children }: { children: React.ReactNode }) 
 
 async function Nav() {
   const { role } = await currentMember();
-  // ponytail: games live on the games. subdomain of whatever host we're on.
-  const host = (await headers()).get("host");
   return (
     <nav className="order-last flex w-full gap-5 overflow-x-auto text-sm sm:order-none sm:w-auto">
       {visibleTo(role).map((s) => (
@@ -39,9 +36,6 @@ async function Nav() {
           {s.name}
         </Link>
       ))}
-      <a href={`//games.${host}`} className="whitespace-nowrap hover:underline">
-        Games
-      </a>
     </nav>
   );
 }
