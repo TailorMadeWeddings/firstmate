@@ -60,21 +60,21 @@ export function EventFields({ crew, value, repeating }: { crew: CrewMember[]; va
           <Label htmlFor="date">Date</Label>
           <Input id="date" name="date" type="date" defaultValue={value.day} required />
         </div>
-        <div className="grid gap-1 group-has-[#all_day:checked]/form:hidden">
+        <div className="grid gap-1 group-has-[#allday:checked]/form:hidden">
           <Label htmlFor="start_time">From</Label>
           <Input id="start_time" name="start_time" type="time" step={300} defaultValue={value.startTime} />
         </div>
-        <div className="grid gap-1 group-has-[#all_day:checked]/form:hidden">
+        <div className="grid gap-1 group-has-[#allday:checked]/form:hidden">
           <Label htmlFor="end_time">To</Label>
           <Input id="end_time" name="end_time" type="time" step={300} defaultValue={value.endTime} />
         </div>
-        <div className="hidden gap-1 group-has-[#all_day:checked]/form:grid">
+        <div className="hidden gap-1 group-has-[#allday:checked]/form:grid">
           <Label htmlFor="end_date">Last day</Label>
           <Input id="end_date" name="end_date" type="date" defaultValue={value.endDay} />
         </div>
       </div>
       <label className="flex items-center gap-2 text-sm">
-        <input id="all_day" type="checkbox" name="all_day" defaultChecked={value.allDay} className="size-4" />
+        <input id="allday" type="checkbox" name="all_day" defaultChecked={value.allDay} className="size-4" />
         All day
       </label>
 

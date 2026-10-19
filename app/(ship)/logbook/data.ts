@@ -2,7 +2,7 @@
 // Reads go through the signed-in user's client, so row-level security
 // decides what they see (crew only; Guests see nothing).
 import { notFound } from "next/navigation";
-import { CREW_COLOURS, type EventRow, type ExceptionRow, type Occurrence, occurrences } from "@/lib/logbook";
+import { type EventRow, type ExceptionRow, type Occurrence, crewColours, occurrences } from "@/lib/logbook";
 import { type Member, currentMember } from "@/lib/players";
 import { createClient } from "@/lib/supabase/server";
 
@@ -38,23 +38,29 @@ export async function loadCrew(householdId: string): Promise<CrewMember[]> {
   const [members, kids] = await Promise.all([
     supabase
       .from("household_members")
-      .select("profile_id, role, profiles(display_name, color)")
+      .select("profile_id, role, joined_at, profiles(display_name, color)")
       .eq("household_id", householdId)
       .order("joined_at"),
     supabase
       .from("dependents")
-      .select("id, display_name, color, date_of_birth")
+      .select("id, display_name, color, date_of_birth, created_at")
       .eq("household_id", householdId)
       .order("date_of_birth"),
   ]);
-  type MemberRow = { profile_id: string; role: keyof typeof ROLE_LABEL; profiles: { display_name: string; color: string | null } | null };
-  type KidRow = { id: string; display_name: string; color: string | null; date_of_birth: string | null };
+  type MemberRow = {
+    profile_id: string;
+    role: keyof typeof ROLE_LABEL;
+    joined_at: string;
+    profiles: { display_name: string; color: string | null } | null;
+  };
+  type KidRow = { id: string; display_name: string; color: string | null; date_of_birth: string | null; created_at: string };
   const people = must<MemberRow[]>(members).map((m) => ({
     key: `p:${m.profile_id}`,
     kind: "profile" as const,
     id: m.profile_id,
     name: m.profiles?.display_name ?? "Crew",
     stored: m.profiles?.color ?? null,
+    addedAt: m.joined_at,
     label: ROLE_LABEL[m.role],
   }));
   const children = must<KidRow[]>(kids).map((k) => ({
@@ -63,10 +69,13 @@ export async function loadCrew(householdId: string): Promise<CrewMember[]> {
     id: k.id,
     name: k.display_name,
     stored: k.color,
+    addedAt: k.created_at,
     label: k.date_of_birth ? `Midshipman · ${age(k.date_of_birth)}` : "Midshipman",
   }));
-  // Anyone without a colour of their own gets the next default, in order.
-  return [...people, ...children].map(({ stored, ...c }, i) => ({ ...c, color: stored ?? CREW_COLOURS[i % CREW_COLOURS.length] }));
+  // Listed people first, then children by birthday; colours by when they joined.
+  const crew = [...people, ...children];
+  const colours = crewColours(crew);
+  return crew.map((c) => ({ key: c.key, kind: c.kind, id: c.id, name: c.name, label: c.label, color: colours.get(c)! }));
 }
 
 function age(born: string) {

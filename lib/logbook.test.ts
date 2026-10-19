@@ -4,6 +4,7 @@ import {
   type EventRow,
   type ExceptionRow,
   CREW_COLOURS,
+  crewColours,
   addDays,
   dayKey,
   describeRepeat,
@@ -125,4 +126,18 @@ test("crew initials read on every default colour", () => {
   assert.equal(textOn("#1baf7a"), "#1e1b18");
   assert.equal(textOn("#6250d6"), "#ffffff");
   assert.equal(CREW_COLOURS.length, 8);
+});
+
+test("adding someone never changes anyone else's colour", () => {
+  const ben = { name: "Ben", stored: null, addedAt: "2026-05-15T10:00:00Z" };
+  const teddy = { name: "Teddy", stored: null, addedAt: "2026-05-15T11:00:00Z" };
+  const twin = { name: "Twin", stored: null, addedAt: "2026-05-15T11:00:01Z" };
+  const before = crewColours([teddy, twin, ben]);
+  // A new child, listed first by birthday, and a new grown-up who picked a colour.
+  const baby = { name: "Baby", stored: null, addedAt: "2026-10-19T00:00:00Z" };
+  const lucy = { name: "Lucy", stored: "#123456", addedAt: "2026-10-18T00:00:00Z" };
+  const after = crewColours([baby, lucy, teddy, twin, ben]);
+  for (const c of [ben, teddy, twin]) assert.equal(after.get(c), before.get(c), c.name);
+  assert.equal(after.get(lucy), "#123456");
+  assert.deepEqual([ben, teddy, twin].map((c) => before.get(c)), CREW_COLOURS.slice(0, 3));
 });

@@ -290,3 +290,14 @@ export function textOn(hex: string): string {
   // Pick the higher contrast of white (L=1) and ink #1e1b18 (L≈0.012).
   return (1.05 / (l + 0.05)) >= ((l + 0.05) / 0.062) ? "#ffffff" : "#1e1b18";
 }
+
+/**
+ * Each person's colour: their own if they picked one, otherwise a default
+ * handed out in the order people joined the household. New people always
+ * come last, so adding someone never changes anyone else's colour (colour
+ * follows the person, not their place in a list).
+ */
+export function crewColours<T extends { stored: string | null; addedAt: string }>(crew: T[]): Map<T, string> {
+  const byJoining = [...crew].sort((a, b) => a.addedAt.localeCompare(b.addedAt));
+  return new Map(byJoining.map((c, i) => [c, c.stored ?? CREW_COLOURS[i % CREW_COLOURS.length]]));
+}

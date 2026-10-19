@@ -26,7 +26,12 @@ export function LiveRefresh({ channel, tables }: { channel: string; tables: stri
     for (const table of names.split(",")) {
       feed.on("postgres_changes", { event: "*", schema: "public", table }, refresh);
     }
-    feed.subscribe();
+    // Join as the signed-in user, not anonymously: the change feed applies
+    // row-level security, and an anonymous subscriber is sent nothing.
+    void supabase.auth.getSession().then(async ({ data }) => {
+      if (data.session) await supabase.realtime.setAuth(data.session.access_token);
+      feed.subscribe();
+    });
     const tick = setInterval(refresh, 5 * 60_000);
     const onVisible = () => document.visibilityState === "visible" && refresh();
     document.addEventListener("visibilitychange", onVisible);

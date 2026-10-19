@@ -61,7 +61,7 @@ export function TimeGrid({
 
   return (
     <div className="overflow-x-auto rounded-2xl border bg-card shadow-sm">
-      <div className={single ? "" : "min-w-[56rem]"}>
+      <div className={single ? "" : "min-w-[70rem]"}>
         {/* Day headers and all-day events */}
         <div className="sticky top-0 z-20 flex border-b bg-card/95 backdrop-blur">
           <div className="w-14 shrink-0 border-r" />
@@ -146,10 +146,11 @@ export function TimeGrid({
                       }}
                     >
                       <span className={`block font-bold leading-tight ${big ? "text-base" : "text-sm"} line-clamp-2`}>{e.title}</span>
-                      <span className={`block text-muted-foreground ${big ? "text-sm" : "text-[11px]"}`}>
-                        {time(e.start)}–{time(e.end)}
-                      </span>
-                      <span className="absolute bottom-1.5 right-1.5">
+                      {/* Time and who share a line, so even an hour-long card shows both. */}
+                      <span className="flex items-center justify-between gap-1">
+                        <span className={`min-w-0 truncate text-muted-foreground ${big ? "text-sm" : "text-[11px]"}`}>
+                          {time(e.start)}–{time(e.end)}
+                        </span>
                         <Avatars keys={e.assignees} crew={crew} />
                       </span>
                     </Link>
