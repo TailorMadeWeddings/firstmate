@@ -12,7 +12,7 @@ async function ErrorContent({
     <>
       {params?.error ? (
         <p className="text-sm text-muted-foreground">
-          Code error: {params.error}
+          {params.error}
         </p>
       ) : (
         <p className="text-sm text-muted-foreground">
