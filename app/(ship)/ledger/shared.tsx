@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import {
   type Category,
   UNITS,
+  type MonthlyTotal,
   type Unit,
+  budgetStatus,
   daysUntil,
   forEntry,
   label,
@@ -102,6 +104,64 @@ export async function loadGoals() {
       .from("budget_savings_goals")
       .select("id, name, target_amount, starting_amount, target_date, account_id, completed_at, created_at")
       .order("created_at"),
+  );
+}
+
+export type Limit = { category_id: string; monthly_amount: number };
+
+export async function loadLimits() {
+  const supabase = await createClient();
+  return must<Limit[]>(await supabase.from("budget_limits").select("category_id, monthly_amount"));
+}
+
+/** Money in and out per category for the given months (YYYY-MM), from the totals view. */
+export async function loadMonthlyTotals(from: string, to: string) {
+  const supabase = await createClient();
+  return must<MonthlyTotal[]>(
+    await supabase
+      .from("budget_monthly_totals")
+      .select("month, category_id, money_in, money_out")
+      .gte("month", `${from}-01`)
+      .lte("month", `${to}-01`),
+  );
+}
+
+/**
+ * Spent against a limit. The bar fills to the limit and the label says what's
+ * left or how far over, so the state never rests on colour alone.
+ */
+export function BudgetBar({ spent, limit }: { spent: number; limit: number }) {
+  const { percent, left, state } = budgetStatus(spent, limit);
+  const fill = { ok: "bg-emerald-600", near: "bg-amber-500", over: "bg-red-600" }[state];
+  return (
+    <div className="flex flex-col gap-1">
+      <div
+        role="meter"
+        aria-valuenow={percent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`${percent}% of budget used`}
+        className="h-2 overflow-hidden rounded-full bg-muted"
+      >
+        <div className={`h-full rounded-full ${fill}`} style={{ width: `${Math.min(percent, 100)}%` }} />
+      </div>
+      <p className="flex justify-between gap-2 text-xs">
+        <span className="tabular-nums text-muted-foreground">
+          {money(spent)} of {money(limit)}
+        </span>
+        <span
+          className={
+            state === "over"
+              ? "font-semibold text-red-600"
+              : state === "near"
+                ? "text-amber-700 dark:text-amber-400"
+                : "text-muted-foreground"
+          }
+        >
+          {state === "over" ? `▲ Over by ${money(-left)}` : `${money(left)} left`}
+        </span>
+      </p>
+    </div>
   );
 }
 

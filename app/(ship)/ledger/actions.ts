@@ -311,3 +311,33 @@ export async function deleteContribution(id: string): Promise<Result> {
     .not("goal_id", "is", null);
   return done(error);
 }
+
+// ---------- category budgets ----------
+
+/** Sets a top-level expense category's monthly limit; an empty amount clears it. */
+export async function setLimit(categoryId: string, _: Result, form: FormData): Promise<Result> {
+  const { owner, supabase } = await db();
+  const raw = text(form, "monthly_amount");
+  if (!raw) {
+    const { error } = await supabase.from("budget_limits").delete().eq("category_id", categoryId);
+    return done(error);
+  }
+  const amount = parseAmount(raw);
+  if (!amount) return "Enter a monthly amount, like 900.";
+  const { data: category } = await supabase
+    .from("budget_categories")
+    .select("type, parent_category_id")
+    .eq("id", categoryId)
+    .maybeSingle<Pick<Category, "type" | "parent_category_id">>();
+  if (!category) return "That category is gone.";
+  if (category.type !== "expense" || category.parent_category_id) {
+    return "Budgets go on top-level expense categories.";
+  }
+  const { error } = await supabase.from("budget_limits").upsert({
+    category_id: categoryId,
+    household_id: owner.householdId,
+    monthly_amount: amount,
+    updated_at: new Date().toISOString(),
+  });
+  return done(error);
+}

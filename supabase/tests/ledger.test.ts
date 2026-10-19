@@ -44,6 +44,7 @@ const TABLES = [
   "budget_account_balances",
   "budget_goal_progress",
   "budget_monthly_totals",
+  "budget_limits",
 ];
 
 async function setup() {
@@ -71,6 +72,8 @@ async function setup() {
       values ('${BILL}', '${HOME}', 'Electricity', 210, 'FREQ=MONTHLY;BYMONTHDAY=15', '2026-11-15', '${ACCOUNT}', '${CATEGORY}');
     insert into budget_savings_goals (id, household_id, name, target_amount, starting_amount)
       values ('${GOAL}', '${HOME}', 'Holiday', 5000, 400);
+    insert into budget_limits (category_id, household_id, monthly_amount)
+      values ('${CATEGORY}', '${HOME}', 900);
   `);
   return db;
 }
@@ -247,6 +250,31 @@ test("kitchen PIN hashes are invisible to every signed-in user", async () => {
       /row-level security/,
     );
   }
+});
+
+test("budget limits: positive, one per category, gone with their category", async () => {
+  const db = await setup();
+  const run = (sql: string) => as(db, OWNER, (tx) => tx.query(sql));
+  await assert.rejects(run(`update budget_limits set monthly_amount = 0`), /check constraint/);
+  await assert.rejects(
+    run(`insert into budget_limits (category_id, household_id, monthly_amount) values ('${CATEGORY}', '${HOME}', 50)`),
+    /duplicate key/,
+  );
+  // Another household's owner can't put a limit on one of our categories.
+  const unbudgeted = "30000000-0000-0000-0000-000000000002";
+  await db.exec(`insert into budget_categories (id, household_id, name, type) values ('${unbudgeted}', '${HOME}', 'Fuel', 'expense')`);
+  await assert.rejects(
+    as(db, OTHER_OWNER, (tx) =>
+      tx.query(`insert into budget_limits (category_id, household_id, monthly_amount) values ('${unbudgeted}', '${OTHER_HOME}', 50)`),
+    ),
+    /foreign key/,
+  );
+  const left = await as(db, OWNER, async (tx) => {
+    await tx.query(`delete from budget_transactions where category_id = '${CATEGORY}'`);
+    await tx.query(`delete from budget_categories where id = '${CATEGORY}'`);
+    return count(tx, "budget_limits");
+  });
+  assert.equal(left, 0);
 });
 
 test("ledger: constraints", async () => {
