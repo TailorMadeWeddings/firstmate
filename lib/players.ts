@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 export type Member = {
@@ -23,6 +23,13 @@ export async function currentMember(): Promise<Member> {
     .maybeSingle();
   if (!member) redirect("/auth/error?error=This account isn't part of the family yet.");
   return { id, householdId: member.household_id, role: member.role };
+}
+
+/** Owners only. Anyone else gets a 404, so they don't learn the page exists. */
+export async function currentOwner(): Promise<Member> {
+  const member = await currentMember();
+  if (member.role !== "owner") notFound();
+  return member;
 }
 
 export async function currentUserId(): Promise<string> {

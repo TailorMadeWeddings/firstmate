@@ -39,6 +39,7 @@ const TABLES = [
   "budget_transactions",
   "budget_recurring_bills",
   "budget_savings_goals",
+  "budget_account_balances",
 ];
 
 async function setup() {
@@ -161,6 +162,17 @@ test("ledger: owners write within their own household only", async () => {
   );
 });
 
+test("ledger: balance is the opening balance plus transactions", async () => {
+  const db = await setup();
+  const balance = await as(db, OWNER, async (tx) => {
+    await tx.query(`update budget_accounts set opening_balance = 1000`);
+    await tx.query(`insert into budget_transactions (household_id, account_id, date, amount)
+                    values ('${HOME}', '${ACCOUNT}', '2026-10-19', 15.70)`);
+    return (await tx.query<{ balance: string }>("select balance from budget_account_balances")).rows;
+  });
+  assert.deepEqual(balance, [{ balance: "931.50" }]);
+});
+
 test("ledger: constraints", async () => {
   const db = await setup();
   const insert = (sql: string) => as(db, OWNER, (tx) => tx.query(sql));
@@ -173,11 +185,10 @@ test("ledger: constraints", async () => {
             values ('${HOME}', '${ACCOUNT}', '2026-10-19', 0, 'Nothing')`),
     /check constraint/,
   );
-  // An account with history can't be deleted; a category can, leaving transactions uncategorised.
+  // Accounts and categories with history can't be deleted (categories get archived instead).
   await assert.rejects(insert(`delete from budget_accounts where id = '${ACCOUNT}'`), /foreign key/);
-  const left = await as(db, OWNER, async (tx) => {
-    await tx.query(`delete from budget_categories where id = '${CATEGORY}'`);
-    return (await tx.query("select category_id from budget_transactions")).rows;
-  });
-  assert.deepEqual(left, [{ category_id: null }]);
+  await assert.rejects(insert(`delete from budget_categories where id = '${CATEGORY}'`), /foreign key/);
+  // Quick-add needs no description.
+  await insert(`insert into budget_transactions (household_id, account_id, category_id, date, amount)
+                values ('${HOME}', '${ACCOUNT}', '${CATEGORY}', '2026-10-19', -5)`);
 });
