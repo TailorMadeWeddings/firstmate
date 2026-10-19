@@ -69,6 +69,13 @@ export async function currentOwner(): Promise<Member> {
   return member;
 }
 
+/** Owners and Trusted members (the crew). Guests get a 404, as with the Ledger for non-owners. */
+export async function currentCrew(): Promise<Member> {
+  const member = await currentMember();
+  if (member.role === "guest") notFound();
+  return member;
+}
+
 export async function currentUserId(): Promise<string> {
   return (await currentMember()).id;
 }
