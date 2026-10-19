@@ -1,0 +1,48 @@
+/* Card backs, the fanned hand, and cards moving on and off the table. */
+
+.card-back {
+  background:
+    repeating-linear-gradient(45deg, transparent 0 3px, rgb(255 255 255 / 0.14) 3px 4px),
+    repeating-linear-gradient(-45deg, transparent 0 3px, rgb(255 255 255 / 0.14) 3px 4px),
+    #9f1239;
+  box-shadow: inset 0 0 0 2px #fff, 0 1px 2px rgb(0 0 0 / 0.3);
+}
+
+/* Cards overlap just enough to keep the hand on one row, however many there are. */
+.hand {
+  container-type: inline-size;
+  display: flex;
+  justify-content: center;
+}
+.hand > * + * {
+  margin-left: min(0.25rem, (100cqw - var(--n) * 3.5rem) / (var(--n) - 1));
+}
+
+@keyframes card-in {
+  from {
+    transform: translate(var(--from-x), var(--from-y)) scale(0.8);
+    opacity: 0;
+  }
+}
+@keyframes trick-out {
+  to {
+    transform: translate(var(--to-x), var(--to-y)) scale(0.6);
+    opacity: 0;
+  }
+}
+.card-in {
+  animation: card-in 220ms ease-out;
+}
+/* Once a trick is won, it sits for a moment, then sweeps to the winner. */
+.card-in.trick-out {
+  animation:
+    card-in 220ms ease-out,
+    trick-out 350ms ease-in 900ms forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-in,
+  .card-in.trick-out {
+    animation: none;
+  }
+}

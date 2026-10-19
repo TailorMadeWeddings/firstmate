@@ -21,6 +21,8 @@ export type GameView = Omit<GameState, "hands" | "kitty"> & {
   hand: Card[];
   /** The open misère bidder's cards, face up once the first trick is done. */
   exposed: Card[] | null;
+  /** How many cards each seat is holding. */
+  counts: number[];
 };
 
 export type RoomView = Omit<Room, "created_by" | "seats" | "state"> & {
@@ -86,7 +88,12 @@ export function viewFor(room: Room, user: string, names: Record<string, string>)
     void kitty; // the bidder's discards stay secret
     const bidder = state.contract?.seat ?? -1;
     const open = state.contract?.bid === "OMIS" && state.lastTrick !== null;
-    game = { ...table, hand: seat >= 0 ? hands[seat] : [], exposed: open ? hands[bidder] : null };
+    game = {
+      ...table,
+      hand: seat >= 0 ? hands[seat] : [],
+      exposed: open ? hands[bidder] : null,
+      counts: hands.map((h) => h.length),
+    };
   }
   return {
     ...rest,
