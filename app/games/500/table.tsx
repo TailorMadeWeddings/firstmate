@@ -1,7 +1,8 @@
 "use client";
 
+import { Bell, BellOff } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { type RoomView } from "@/lib/games/500/room";
 import {
@@ -24,16 +25,32 @@ import {
 } from "@/lib/games/500/rules";
 import { cn } from "@/lib/utils";
 import { createGame } from "./actions";
+import "./cards.css";
+import { CourtArt } from "./court";
 
 const SYMBOL: Record<Suit, string> = { S: "♠", C: "♣", D: "♦", H: "♥" };
 const SUIT_NAME: Record<Suit, string> = { S: "spades", C: "clubs", D: "diamonds", H: "hearts" };
 const DISPLAY_ORDER: Suit[] = ["S", "H", "C", "D"]; // alternate colours in your hand
-// Where each seat sits on screen, counting clockwise from you at the bottom.
-const PLACES = [
-  "col-start-2 row-start-3",
-  "col-start-1 row-start-2",
-  "col-start-2 row-start-1",
-  "col-start-3 row-start-2",
+// Screen places count clockwise from you at the bottom: bottom, left, top, right.
+const SEAT_PLACES = [
+  "bottom-3 left-1/2 -translate-x-1/2",
+  "left-3 top-1/2 -translate-y-1/2",
+  "top-3 left-1/2 -translate-x-1/2",
+  "right-3 top-1/2 -translate-y-1/2",
+];
+/** Which way each place is from the middle of the table. */
+const DIRS = [
+  [0, 1],
+  [-1, 0],
+  [0, -1],
+  [1, 0],
+];
+/** Where a played card lands, in rem from the middle, nudged towards its player. */
+const TRICK_AT = [
+  [0, 2.6],
+  [-2.75, 0],
+  [0, -2.6],
+  [2.75, 0],
 ];
 const isRed = (s: Suit) => s === "D" || s === "H";
 const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`);
@@ -46,6 +63,40 @@ function bidLabel(b: Bid | "pass") {
   return `${parseInt(b)}${t === "NT" ? "NT" : SYMBOL[t]}`;
 }
 
+// Phones only let a page make sound after a tap, so the first tap anywhere unlocks it.
+let audio: AudioContext | null = null;
+const unlockAudio = () => {
+  audio ??= new AudioContext();
+  void audio.resume();
+};
+
+/** A short two-note chime. */
+function chime() {
+  if (!audio) return;
+  const t = audio.currentTime;
+  const osc = audio.createOscillator();
+  const gain = audio.createGain();
+  osc.frequency.setValueAtTime(660, t);
+  osc.frequency.setValueAtTime(880, t + 0.12);
+  gain.gain.setValueAtTime(0.15, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+  osc.connect(gain).connect(audio.destination);
+  osc.start(t);
+  osc.stop(t + 0.35);
+}
+
+/** A bid as a screen reader should say it, e.g. "6 spades, 40 points". */
+function bidSpoken(b: Bid) {
+  const t = trumpOf(b);
+  const name = isMisere(b) ? bidLabel(b) : `${parseInt(b)} ${t === "NT" ? "no trumps" : SUIT_NAME[t]}`;
+  return `${name}, ${bidValue(b)} points`;
+}
+
+function cardName(c: Card) {
+  if (c === JOKER) return "the joker";
+  return `${rankOf(c) === "T" ? "10" : rankOf(c)}${SYMBOL[c[1] as Suit]}`;
+}
+
 function sortHand(hand: Card[], trump: Trump) {
   const key = (c: Card) => {
     const s = suitOf(c, trump);
@@ -54,47 +105,112 @@ function sortHand(hand: Card[], trump: Trump) {
   return [...hand].sort((a, b) => key(a) - key(b));
 }
 
+// ponytail: big centre suit instead of full pip layouts, which don't read at
+// phone size anyway. Corner indices stay visible when the hand overlaps.
 export function PlayingCard({
   card,
   onClick,
   dim,
   raised,
+  className,
+  style,
 }: {
   card: Card;
   onClick?: () => void;
   dim?: boolean;
   raised?: boolean;
+  className?: string;
+  style?: React.CSSProperties;
 }) {
   const joker = card === JOKER;
   const suit = card[1] as Suit;
-  const rank = rankOf(card) === "T" ? "10" : rankOf(card);
+  const rank = joker ? "★" : rankOf(card) === "T" ? "10" : rankOf(card);
+  const pip = joker ? "" : SYMBOL[suit];
+  const face = "JQK".includes(rank);
   const Tag = onClick ? "button" : "div";
+  const corner = (
+    <span className="flex flex-col items-center text-[13px] font-bold leading-none tracking-tighter">
+      {rank}
+      <span className="text-[11px]">{pip}</span>
+    </span>
+  );
   return (
     <Tag
       type={onClick ? "button" : undefined}
       onClick={onClick}
       aria-label={joker ? "Joker" : `${rank} of ${SUIT_NAME[suit]}`}
       aria-pressed={onClick && raised !== undefined ? raised : undefined}
+      style={style}
       className={cn(
-        "flex h-16 w-11 shrink-0 select-none flex-col items-center justify-center rounded-md border border-neutral-300 bg-white font-semibold leading-none shadow-sm transition",
+        "card-face relative block h-20 w-14 shrink-0 select-none rounded-lg transition",
         joker || isRed(suit) ? "text-red-600" : "text-neutral-900",
-        dim && "opacity-40",
-        raised && "-translate-y-2 ring-2 ring-sky-500",
-        onClick && "hover:-translate-y-1 focus-visible:ring-2 focus-visible:ring-sky-500",
+        dim && "brightness-[.7]",
+        raised && "-translate-y-3 ring-2 ring-sky-500",
+        onClick && "hover:-translate-y-1.5 focus-visible:ring-2 focus-visible:ring-sky-500",
+        className,
       )}
     >
-      {joker ? (
-        <>
-          <span className="text-xl">★</span>
-          <span className="text-[9px] tracking-wide">JOKER</span>
-        </>
-      ) : (
-        <>
-          <span className="text-lg">{rank}</span>
-          <span className="text-lg">{SYMBOL[suit]}</span>
-        </>
-      )}
+      <span className="absolute left-1 top-1 z-10">{corner}</span>
+      <span className="absolute bottom-1 right-1 z-10 rotate-180">{corner}</span>
+      <span className="absolute inset-0 flex items-center justify-center">
+        {joker ? (
+          <span className="flex flex-col items-center leading-none">
+            <svg viewBox="0 0 24 24" className="h-9 w-9 drop-shadow-sm" aria-hidden>
+              <defs>
+                <linearGradient id="joker-star" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stopColor="#f59e0b" />
+                  <stop offset="1" stopColor="#dc2626" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M12 1.5l3.1 6.6 7.2.9-5.3 5 1.4 7.1L12 17.6 5.6 21.1 7 14l-5.3-5 7.2-.9z"
+                fill="url(#joker-star)"
+              />
+            </svg>
+            <span className="text-[8px] font-bold tracking-widest">JOKER</span>
+          </span>
+        ) : face ? (
+          <span className="absolute inset-x-3 inset-y-1.5">
+            <CourtArt rank={rank as "J" | "Q" | "K"} suit={suit} />
+          </span>
+        ) : (
+          <span className={rank === "A" ? "text-4xl" : "text-3xl"}>{pip}</span>
+        )}
+      </span>
     </Tag>
+  );
+}
+
+/** Face-down cards fanned out, one per card a player is holding. */
+function CardFan({
+  count,
+  dim,
+  place,
+  fresh,
+}: {
+  count: number;
+  dim?: boolean;
+  place: number;
+  /** Whether card i arrived while you were watching, so gets dealt in. */
+  fresh: (i: number) => boolean;
+}) {
+  const [dx, dy] = DIRS[place];
+  return (
+    <div
+      role="img"
+      aria-label={`${count} card${count === 1 ? "" : "s"}`}
+      className={cn("flex h-7", dim && "opacity-40")}
+    >
+      {Array.from({ length: count }, (_, i) => (
+        <div
+          key={i}
+          className={cn("card-back h-7 w-5 rounded-sm", fresh(i) && "deal-in", i > 0 && "-ml-3.5")}
+          style={
+            { "--i": i, "--deal-x": `${-dx * 7}rem`, "--deal-y": `${-dy * 7}rem` } as React.CSSProperties
+          }
+        />
+      ))}
+    </div>
   );
 }
 
@@ -109,6 +225,9 @@ export function Table({
 }) {
   const [discards, setDiscards] = useState<Card[]>([]);
   const [namingJoker, setNamingJoker] = useState(false);
+  // First tap lifts a card, a second tap plays it, so a slip doesn't throw a card away.
+  const [selected, setSelected] = useState<Card | null>(null);
+  const [pending, setPending] = useState<Card | null>(null);
   const game = view.game!;
   const { phase, contract, turn } = game;
 
@@ -120,20 +239,86 @@ export function Table({
     act(action);
     setDiscards([]);
     setNamingJoker(false);
+    setSelected(null);
+    setPending(action.type === "play" ? action.card : null);
   };
 
   const trump: Trump = contract && phase !== "bidding" ? trumpOf(contract.bid) : "NT";
   const active = ["bidding", "kitty", "playing"].includes(phase);
-  const myTurn = active && turn === view.seat && !busy;
+  const myMove = active && turn === view.seat;
+  const myTurn = myMove && !busy;
+
+  // Let people know when the turn comes round to them.
+  const [muted, setMuted] = useState(false);
+  useEffect(() => {
+    try {
+      setMuted(localStorage.getItem("500-muted") === "1");
+    } catch {}
+    document.addEventListener("pointerdown", unlockAudio);
+    return () => document.removeEventListener("pointerdown", unlockAudio);
+  }, []);
+  const toggleMuted = () => {
+    setMuted(!muted);
+    try {
+      localStorage.setItem("500-muted", muted ? "0" : "1");
+    } catch {}
+  };
+  const wasMyMove = useRef(myMove);
+  useEffect(() => {
+    if (myMove && !wasMyMove.current) {
+      if (!muted) chime();
+      navigator.vibrate?.(150);
+    }
+    wasMyMove.current = myMove;
+  }, [myMove, muted]);
+  useEffect(() => {
+    if (!myMove) return;
+    const title = document.title;
+    document.title = `Your turn · ${title}`;
+    return () => {
+      document.title = title;
+    };
+  }, [myMove]);
   const legal = phase === "playing" && myTurn ? legalPlays(game.hand, trump, game.led) : [];
-  const shown = game.trick.length ? game.trick : (game.lastTrick?.plays ?? []);
-  const trickWonBy = game.trick.length ? null : (game.lastTrick?.winner ?? null);
+  // "Last trick" shows the one before. It's keyed to the trick it was opened on,
+  // so it closes by itself once that trick is over.
+  const trickId = `${game.history.length}.${game.tricks.reduce((a, b) => a + b, 0)}`;
+  const [peekAt, setPeekAt] = useState<string | null>(null);
+  const canPeek = phase === "playing" && game.lastTrick !== null;
+  const peeking = canPeek && peekAt === trickId;
+  // Your card goes down the moment you play it, not when the server answers.
+  const playing = busy && pending && game.hand.includes(pending) ? pending : null;
+  const trickNow = playing ? [...game.trick, { seat: view.seat, card: playing }] : game.trick;
+  const hand = playing ? game.hand.filter((c) => c !== playing) : game.hand;
+  const between = !trickNow.length || peeking; // showing a finished trick
+  const shown = between ? (game.lastTrick?.plays ?? []) : trickNow;
+  const trickWonBy = between ? (game.lastTrick?.winner ?? null) : null;
+  const place = (seat: number) => (seat - me + 4) % 4;
+
+  // Whatever is already on the table when the page opens stays put; only what
+  // happens while you watch is animated. Keys name the deal and the trick, so
+  // the same card in a later hand counts as new.
+  const dealId = `${game.history.length}-${game.dealer}`;
+  const trickNo = game.tricks.reduce((a, b) => a + b, 0) - (between ? 1 : 0);
+  const trickKey = (card: Card) => `${game.history.length}.${trickNo}:${card}`;
+  const fanKey = (seat: number, i: number) => `${dealId}:${seat}:${i}`;
+  const [onArrival] = useState(
+    () =>
+      new Set([
+        ...game.hand.map((c) => `${dealId}:${c}`),
+        ...shown.map((p) => trickKey(p.card)),
+        ...game.counts.flatMap((n, seat) => Array.from({ length: n }, (_, i) => fanKey(seat, i))),
+      ]),
+  );
+  const fresh = (key: string) => !onArrival.has(key);
 
   function onCard(card: Card) {
     if (phase === "kitty") {
       setDiscards((d) =>
         d.includes(card) ? d.filter((c) => c !== card) : d.length < 3 ? [...d, card] : d,
       );
+    } else if (card !== selected) {
+      setSelected(card);
     } else if (card === JOKER && trump === "NT" && !game.trick.length) {
       setNamingJoker(true);
     } else {
@@ -161,73 +346,131 @@ export function Table({
 
   return (
     <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-4 px-4 py-6">
-      <header className="flex items-baseline justify-between gap-4">
-        <div className="flex items-baseline gap-3">
-          <Link href="/500" className="text-sm text-muted-foreground hover:underline">
+      <header className="flex items-baseline justify-between gap-2">
+        <div className="flex items-baseline gap-2 sm:gap-3">
+          <Link
+            href="/500"
+            className="whitespace-nowrap text-sm text-muted-foreground hover:underline"
+          >
             ← 500
           </Link>
-          <h1 className="text-2xl font-bold">Game {view.code}</h1>
+          <h1 className="whitespace-nowrap text-xl font-bold sm:text-2xl">Game {view.code}</h1>
         </div>
-        <p className="text-sm tabular-nums">
-          Us <b>{game.scores[myTeam]}</b> · Them <b>{game.scores[1 - myTeam]}</b>
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="whitespace-nowrap text-sm tabular-nums">
+            Us <b>{game.scores[myTeam]}</b> · Them <b>{game.scores[1 - myTeam]}</b>
+          </p>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            aria-label={muted ? "Turn sound on" : "Turn sound off"}
+            title={muted ? "Turn sound on" : "Turn sound off"}
+            onClick={toggleMuted}
+          >
+            {muted ? <BellOff /> : <Bell />}
+          </Button>
+        </div>
       </header>
 
       <section
         aria-label="Table"
-        className="grid h-[22rem] grid-cols-3 grid-rows-3 place-items-center rounded-2xl bg-emerald-800 p-3 shadow-inner"
+        className="felt relative h-[21rem] overflow-hidden rounded-2xl text-emerald-50"
       >
-        {[0, 1, 2, 3].map((seat) => {
-          const played = shown.find((p) => p.seat === seat);
-          return (
-            <div
-              key={seat}
-              className={cn(
-                "flex flex-col items-center gap-1 text-emerald-50",
-                PLACES[(seat - me + 4) % 4],
-              )}
-            >
-              <div
-                className={cn(
-                  "max-w-28 truncate rounded-full px-2 py-0.5 text-xs font-semibold",
-                  active && turn === seat && "bg-amber-300 text-amber-950",
-                )}
-              >
-                {nameOf(seat)}
-              </div>
-              <div className="h-4 whitespace-nowrap text-xs opacity-75">{seatStatus(seat)}</div>
-              {played ? (
-                <div className={cn("rounded-md", trickWonBy === seat && "ring-2 ring-amber-300")}>
-                  <PlayingCard card={played.card} />
-                </div>
-              ) : (
-                <div className="h-16 w-11 rounded-md border border-dashed border-emerald-50/30" />
-              )}
-            </div>
-          );
-        })}
-        <div className="col-start-2 row-start-2 text-center text-sm text-emerald-50">
+        <div className="absolute left-4 top-4 text-xs">
           {contract && phase !== "bidding" ? (
             <>
-              <div className="font-semibold">
+              <div className="text-sm font-semibold">
                 {isMisere(contract.bid)
                   ? bidLabel(contract.bid)
                   : trump === "NT"
                     ? "No trumps"
                     : `${SYMBOL[trump]} trumps`}
               </div>
-              {game.led && <div className="opacity-75">Follow {SYMBOL[game.led]}</div>}
+              <div className="opacity-75">
+                {bidLabel(contract.bid)} by {nameOf(contract.seat)}
+              </div>
+              {peeking ? (
+                <div className="opacity-75">Last trick</div>
+              ) : (
+                game.led && <div className="opacity-75">Follow {SYMBOL[game.led]}</div>
+              )}
+              {canPeek && (
+                <button
+                  type="button"
+                  aria-pressed={peeking}
+                  className="mt-1 underline underline-offset-2 opacity-75 hover:opacity-100"
+                  onClick={() => setPeekAt(peeking ? null : trickId)}
+                >
+                  {peeking ? "Back to this trick" : "Last trick"}
+                </button>
+              )}
             </>
           ) : (
-            <div className="opacity-75">Bidding</div>
+            <div className="text-sm font-semibold opacity-75">Bidding</div>
           )}
         </div>
+
+        {[0, 1, 2, 3].map((seat) => (
+          <div
+            key={seat}
+            className={cn("absolute flex flex-col items-center gap-1", SEAT_PLACES[place(seat)])}
+          >
+            {seat !== view.seat && (
+              <CardFan
+                count={game.counts[seat]}
+                dim={sitsOut(game, seat)}
+                place={place(seat)}
+                fresh={(i) => fresh(fanKey(seat, i))}
+              />
+            )}
+            <div
+              className={cn(
+                "max-w-20 truncate rounded-full px-2 py-0.5 text-xs font-semibold",
+                active && turn === seat && "turn-glow bg-amber-300 text-amber-950",
+              )}
+            >
+              {nameOf(seat)}
+            </div>
+            <div className="h-4 whitespace-nowrap text-xs opacity-75">{seatStatus(seat)}</div>
+          </div>
+        ))}
+
+        {shown.map(({ seat, card }, i) => {
+          const [x, y] = TRICK_AT[place(seat)];
+          const [fromX, fromY] = DIRS[place(seat)];
+          const [toX, toY] = trickWonBy === null ? [0, 0] : DIRS[place(trickWonBy)];
+          return (
+            <div
+              key={(peeking ? "peek-" : "") + card}
+              className="absolute left-1/2 top-1/2"
+              style={{ transform: `translate(-50%, -50%) translate(${x}rem, ${y}rem)`, zIndex: i }}
+            >
+              <PlayingCard
+                card={card}
+                className={cn(
+                  fresh(trickKey(card)) && !peeking && "card-in",
+                  fresh(trickKey(card)) && !peeking && between && "trick-out",
+                  trickWonBy === seat && "ring-2 ring-amber-300",
+                )}
+                style={
+                  {
+                    "--from-x": `${fromX * 6}rem`,
+                    "--from-y": `${fromY * 6}rem`,
+                    "--to-x": `${toX * 9 - x}rem`,
+                    "--to-y": `${toY * 9 - y}rem`,
+                  } as React.CSSProperties
+                }
+              />
+            </div>
+          );
+        })}
       </section>
 
       {game.exposed && contract && contract.seat !== view.seat && (
         <section aria-label={`${nameOf(contract.seat)}'s open hand`} className="flex flex-col gap-1">
           <p className="text-xs text-muted-foreground">{nameOf(contract.seat)}&apos;s open misère hand</p>
-          <div className="flex flex-wrap gap-1">
+          <div className="hand" style={{ "--n": game.exposed.length } as React.CSSProperties}>
             {sortHand(game.exposed, "NT").map((c) => (
               <PlayingCard key={c} card={c} />
             ))}
@@ -240,6 +483,7 @@ export function Table({
 
         {phase === "gameOver" && (
           <div className="flex flex-col gap-3">
+            {game.winner === myTeam && view.seat >= 0 && <Confetti />}
             <p className="text-lg font-semibold">
               {winners} win{game.winner === myTeam && view.seat >= 0 ? "!" : "."}
             </p>
@@ -278,6 +522,7 @@ export function Table({
                       variant="outline"
                       disabled={!canBid(game, b)}
                       title={`${bidValue(b)} points`}
+                      aria-label={bidSpoken(b)}
                       className={cn(t !== "NT" && isRed(t) && "text-red-600")}
                       onClick={() => send({ type: "bid", bid: b })}
                     >
@@ -294,6 +539,7 @@ export function Table({
                     variant="outline"
                     disabled={!canBid(game, b)}
                     title={`${bidValue(b)} points`}
+                    aria-label={bidSpoken(b)}
                     onClick={() => send({ type: "bid", bid: b })}
                   >
                     {bidLabel(b)}
@@ -349,26 +595,136 @@ export function Table({
           ) : (
             <p className={cn(!myTurn && "text-muted-foreground")}>
               {trickWonBy !== null && `${nameOf(trickWonBy)} won the trick. `}
-              {turn === view.seat ? "Your turn." : `${nameOf(turn)} to play…`}
+              {turn !== view.seat
+                ? `${nameOf(turn)} to play…`
+                : selected
+                  ? `Tap ${cardName(selected)} again to play it.`
+                  : "Your turn. Tap a card to pick it."}
             </p>
           ))}
       </section>
 
-      <section aria-label="Your hand" className="flex flex-wrap justify-center gap-1 pt-2">
-        {sortHand(game.hand, trump).map((c) => {
+      <section
+        key={`deal-${game.history.length}-${game.dealer}`}
+        aria-label="Your hand"
+        className="hand px-4 pb-2 pt-4"
+        style={{ "--n": hand.length } as React.CSSProperties}
+      >
+        {sortHand(hand, trump).map((c, i) => {
           const playable = phase === "playing" && myTurn && legal.includes(c) && !namingJoker;
           const discarding = phase === "kitty" && myTurn;
+          // How far this card is from the middle of the hand, for the arc.
+          const off = i - (hand.length - 1) / 2;
+          const half = Math.max((hand.length - 1) / 2, 1);
           return (
-            <PlayingCard
+            <div
               key={c}
-              card={c}
-              dim={phase === "playing" && myTurn && !legal.includes(c)}
-              raised={discarding ? discards.includes(c) : undefined}
-              onClick={playable || discarding ? () => onCard(c) : undefined}
-            />
+              className={cn(fresh(`${dealId}:${c}`) && "deal-in")}
+              style={
+                {
+                  "--i": i,
+                  transform: `translateY(${(off / half) ** 2 * 10}px) rotate(${off * Math.min(4, 36 / hand.length)}deg)`,
+                  transformOrigin: "50% 130%",
+                } as React.CSSProperties
+              }
+            >
+              <PlayingCard
+                card={c}
+                dim={phase === "playing" && myTurn && !legal.includes(c)}
+                raised={
+                  discarding ? discards.includes(c) : playable ? selected === c : undefined
+                }
+                onClick={playable || discarding ? () => onCard(c) : undefined}
+              />
+            </div>
           );
         })}
       </section>
+
+      {game.history.length > 0 && <ScoreHistory game={game} myTeam={myTeam} nameOf={nameOf} />}
     </main>
+  );
+}
+
+// ponytail: index-based "random" spread, so it looks the same on every render.
+const CONFETTI = ["#f59e0b", "#ef4444", "#10b981", "#3b82f6", "#a855f7", "#f472b6"];
+function Confetti() {
+  return (
+    <div aria-hidden>
+      {Array.from({ length: 48 }, (_, i) => (
+        <span
+          key={i}
+          className="confetti"
+          style={
+            {
+              left: `${(i * 37) % 100}%`,
+              background: CONFETTI[i % CONFETTI.length],
+              "--fall": `${2.4 + (i % 5) * 0.35}s`,
+              "--wait": `${(i % 12) * 0.12}s`,
+              "--spin": `${(i % 2 ? 1 : -1) * (360 + i * 25)}deg`,
+            } as React.CSSProperties
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
+function ScoreHistory({
+  game,
+  myTeam,
+  nameOf,
+}: {
+  game: NonNullable<RoomView["game"]>;
+  myTeam: number;
+  nameOf: (seat: number) => string;
+}) {
+  const totals = [0, 0];
+  const rows = game.history.map((h) => {
+    totals[0] += h.points[0];
+    totals[1] += h.points[1];
+    return { h, us: totals[myTeam], them: totals[1 - myTeam] };
+  });
+  const n = rows.length;
+  return (
+    <details className="rounded-xl border px-3 py-2 text-sm">
+      <summary className="cursor-pointer select-none">
+        Scores · {n} hand{n === 1 ? "" : "s"} played
+      </summary>
+      <table className="mt-2 w-full tabular-nums">
+        <thead className="text-left text-xs text-muted-foreground">
+          <tr>
+            <th className="py-1 font-normal">Bid</th>
+            <th className="py-1 text-right font-normal">Us</th>
+            <th className="py-1 text-right font-normal">Them</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ h, us, them }, i) => (
+            <tr key={i} className="border-t">
+              <td className="py-1">
+                {nameOf(h.seat)} {bidLabel(h.bid)}{" "}
+                <span className={h.made ? "text-emerald-700" : "text-red-600"}>
+                  {h.made ? "made" : "down"}
+                </span>{" "}
+                <span className="text-muted-foreground">
+                  · {h.tricks} trick{h.tricks === 1 ? "" : "s"}
+                </span>
+              </td>
+              <td className="py-1 text-right">
+                <span className="text-xs text-muted-foreground">{signed(h.points[myTeam])}</span>{" "}
+                <b>{us}</b>
+              </td>
+              <td className="py-1 text-right">
+                <span className="text-xs text-muted-foreground">
+                  {signed(h.points[1 - myTeam])}
+                </span>{" "}
+                <b>{them}</b>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
   );
 }
