@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { IdleLock } from "@/components/idle-lock";
 import { LogoutButton } from "@/components/logout-button";
+import { type NavItem, ShipNav } from "@/components/ship-nav";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Button } from "@/components/ui/button";
 import { IDLE_MINUTES } from "@/lib/kitchen";
@@ -10,17 +11,31 @@ import { canSeeLedger, currentMember, kitchenState } from "@/lib/players";
 import { visibleSections } from "@/lib/sections";
 import { lock } from "./helm/actions";
 
+/**
+ * The shell from the AI Studio mock-up: an icon sidebar on desktop and the
+ * kitchen screen, a tab bar along the bottom on phones, and a quiet top bar.
+ */
 export default function ShipLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="border-b">
-        <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-          <Link href="/" className="text-lg font-bold">
-            ⚓ First Mate
+    <div className="flex min-h-screen">
+      <aside className="sticky top-0 hidden h-screen w-28 shrink-0 flex-col items-center gap-10 border-r bg-background py-8 md:flex">
+        <Link
+          href="/"
+          aria-label="First Mate home"
+          className="flex size-12 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-lg shadow-primary/20"
+        >
+          <span className="font-serif text-2xl font-black italic">F</span>
+        </Link>
+        <Suspense>
+          <Nav layout="sidebar" />
+        </Suspense>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center gap-3 border-b bg-background px-4 py-3 md:px-10">
+          <Link href="/" className="font-serif text-xl font-black tracking-tight md:hidden">
+            First Mate
           </Link>
-          <Suspense>
-            <Nav />
-          </Suspense>
           <div className="ml-auto flex items-center gap-2">
             <Suspense>
               <KitchenStatus />
@@ -28,29 +43,31 @@ export default function ShipLayout({ children }: { children: React.ReactNode }) 
             <ThemeSwitcher />
             <LogoutButton />
           </div>
-        </div>
-      </header>
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
+        </header>
+        {/* Room at the bottom on phones so the tab bar never covers content. */}
+        <main className="flex-1 bg-muted/50 px-4 pb-28 pt-6 md:px-10 md:pb-10 md:pt-8">
+          <div className="mx-auto w-full max-w-6xl">{children}</div>
+        </main>
+      </div>
+
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+        <Suspense>
+          <Nav layout="tabs" />
+        </Suspense>
+      </div>
     </div>
   );
 }
 
-async function Nav() {
+async function Nav({ layout }: { layout: "sidebar" | "tabs" }) {
   const member = await currentMember();
   // ponytail: games live on the games. subdomain of whatever host we're on.
   const host = (await headers()).get("host");
-  return (
-    <nav className="order-last flex w-full gap-5 overflow-x-auto text-sm sm:order-none sm:w-auto">
-      {visibleSections(await canSeeLedger(member)).map((s) => (
-        <Link key={s.slug} href={`/${s.slug}`} className="whitespace-nowrap hover:underline">
-          {s.name}
-        </Link>
-      ))}
-      <a href={`//games.${host}`} className="whitespace-nowrap hover:underline">
-        Games
-      </a>
-    </nav>
-  );
+  const items: NavItem[] = [
+    ...visibleSections(await canSeeLedger(member)).map((s) => ({ slug: s.slug, name: s.name, href: `/${s.slug}` })),
+    { slug: "games", name: "Games", href: `//games.${host}` },
+  ];
+  return <ShipNav items={items} layout={layout} />;
 }
 
 /** On the kitchen screen: a badge, and while the Ledger is unlocked a Lock button and the idle timer. */
@@ -59,7 +76,10 @@ async function KitchenStatus() {
   if (!kitchen) return null;
   return (
     <>
-      <Link href="/helm" className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+      <Link
+        href="/helm"
+        className="rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+      >
         Kitchen
       </Link>
       {unlock && (

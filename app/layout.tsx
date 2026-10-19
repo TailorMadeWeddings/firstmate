@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import { Fraunces, Inter } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 
@@ -13,11 +13,15 @@ export const metadata: Metadata = {
   description: "The Kidd family's household app.",
 };
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// The mock-up's pairing: Fraunces for display, Inter for everything else.
+const serif = Fraunces({
+  variable: "--font-serif",
   display: "swap",
   subsets: ["latin"],
+  style: ["normal", "italic"],
+  axes: ["opsz"],
 });
+const sans = Inter({ variable: "--font-sans", display: "swap", subsets: ["latin"] });
 
 export default function RootLayout({
   children,
@@ -26,7 +30,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${geistSans.className} antialiased`}>
+      <body className={`${serif.variable} ${sans.variable} antialiased`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
