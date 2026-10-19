@@ -9,7 +9,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { ACCOUNT_TYPES, daysUntil, label, money } from "@/lib/ledger";
 import { currentOwner } from "@/lib/players";
 import { createClient } from "@/lib/supabase/server";
-import { addAccount, addTransaction } from "./actions";
+import { addAccount, addTransaction, importCsv } from "./actions";
 import {
   BillRow,
   type Transaction,
@@ -22,16 +22,19 @@ import {
 
 export const metadata: Metadata = { title: "Ledger · First Mate" };
 
-export default function Ledger() {
+type Search = Promise<{ imported?: string; skipped?: string }>;
+
+export default function Ledger({ searchParams }: { searchParams: Search }) {
   return (
     <Suspense fallback={<p className="text-muted-foreground">Loading…</p>}>
-      <LedgerHome />
+      <LedgerHome searchParams={searchParams} />
     </Suspense>
   );
 }
 
-async function LedgerHome() {
+async function LedgerHome({ searchParams }: { searchParams: Search }) {
   await currentOwner();
+  const { imported, skipped } = await searchParams;
   const supabase = await createClient();
   const [accounts, categories, bills, goals, balances, recent] = await Promise.all([
     loadAccounts(),
@@ -66,6 +69,13 @@ async function LedgerHome() {
           ))}
         </nav>
       </header>
+
+      {imported !== undefined && (
+        <p role="status" className="rounded-xl border px-4 py-3 text-sm">
+          Imported {imported} transaction{imported === "1" ? "" : "s"}
+          {Number(skipped) > 0 && `, skipped ${skipped} already in the Ledger`}.
+        </p>
+      )}
 
       {upcoming.length > 0 && (
         <section className="flex flex-col gap-3">
@@ -135,6 +145,34 @@ async function LedgerHome() {
             />
             <Button className="self-start">Save</Button>
           </ActionForm>
+          <details>
+            <summary className="cursor-pointer text-sm text-muted-foreground">
+              Import a CommBank CSV
+            </summary>
+            <ActionForm action={importCsv} className="mt-3 flex flex-col gap-3 rounded-xl border p-4">
+              <p className="text-sm text-muted-foreground">
+                In NetBank, open the account, choose Export and pick CSV. Importing the same
+                dates again is safe: transactions already here are skipped.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-1">
+                  <Label htmlFor="import-account">Into account</Label>
+                  <NativeSelect id="import-account" name="account_id">
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </div>
+                <div className="grid gap-1">
+                  <Label htmlFor="import-file">CSV file</Label>
+                  <Input id="import-file" name="file" type="file" accept=".csv,text/csv" required />
+                </div>
+              </div>
+              <Button className="self-start">Import</Button>
+            </ActionForm>
+          </details>
         </section>
       )}
 

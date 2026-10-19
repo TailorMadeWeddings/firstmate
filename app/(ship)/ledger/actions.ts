@@ -10,7 +10,9 @@ import {
   UNITS,
   type Unit,
   nextDue,
+  notYetSaved,
   parseAmount,
+  parseCommBankCsv,
   ruleFor,
   signed,
 } from "@/lib/ledger";
@@ -106,6 +108,44 @@ export async function deleteTransaction(id: string): Promise<Result> {
   if (error) return done(error);
   revalidatePath("/ledger", "layout");
   redirect("/ledger");
+}
+
+/** A NetBank CSV export into one account. Rows come in uncategorised. */
+export async function importCsv(_: Result, form: FormData): Promise<Result> {
+  const { owner, supabase } = await db();
+  const file = form.get("file");
+  if (!(file instanceof File) || !file.size) return "Choose a CSV file from NetBank.";
+  const rows = parseCommBankCsv(await file.text());
+  if (typeof rows === "string") return rows;
+  const accountId = text(form, "account_id");
+  const dates = rows.map((r) => r.date).sort();
+
+  // Everything already saved in that date range, a page at a time (the API
+  // caps each read at 1000 rows).
+  const existing = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("budget_transactions")
+      .select("date, amount, description")
+      .eq("account_id", accountId)
+      .gte("date", dates[0])
+      .lte("date", dates.at(-1)!)
+      .order("id")
+      .range(from, from + 999);
+    if (error) return done(error);
+    existing.push(...data);
+    if (data.length < 1000) break;
+  }
+
+  const fresh = notYetSaved(rows, existing);
+  if (fresh.length) {
+    const { error } = await supabase.from("budget_transactions").insert(
+      fresh.map((r) => ({ ...r, household_id: owner.householdId, account_id: accountId })),
+    );
+    if (error) return done(error, "Pick an account.");
+  }
+  revalidatePath("/ledger", "layout");
+  redirect(`/ledger?imported=${fresh.length}&skipped=${rows.length - fresh.length}`);
 }
 
 // ---------- categories ----------
