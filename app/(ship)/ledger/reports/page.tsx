@@ -191,10 +191,10 @@ function Filters({ period: p, category }: { period: Period; category?: string })
           </Button>
         );
       })}
-      <form className="flex items-end gap-2">
-        <Input name="from" type="month" aria-label="From month" defaultValue={p.from} className="w-40" />
+      <form className="flex flex-wrap items-end gap-2">
+        <Input name="from" type="month" aria-label="From month" defaultValue={p.from} className="w-[9.5rem]" />
         <span className="pb-2 text-sm text-muted-foreground">to</span>
-        <Input name="to" type="month" aria-label="To month" defaultValue={p.to} className="w-40" />
+        <Input name="to" type="month" aria-label="To month" defaultValue={p.to} className="w-[9.5rem]" />
         {category && <input type="hidden" name="category" value={category} />}
         <Button size="sm" variant="secondary">
           Show
@@ -362,7 +362,7 @@ function Trend({ trend }: { trend: ReturnType<typeof monthly> }) {
           <span className="-mt-px pt-0.5 tabular-nums">{compact(max)}</span>
         </div>
         <div className="flex h-44 items-end border-b">
-          {trend.map((m) => (
+          {trend.map((m, i) => (
             <div
               key={m.month}
               tabIndex={0}
@@ -373,7 +373,10 @@ function Trend({ trend }: { trend: ReturnType<typeof monthly> }) {
               <span className="w-full max-w-[24px] rounded-t-[4px] bg-[var(--money-out)]" style={{ height: height(m.moneyOut) }} />
               <span
                 role="tooltip"
-                className="pointer-events-none absolute bottom-full z-10 mb-1 hidden min-w-36 rounded-md border bg-background p-2 text-xs shadow-md group-hover:block group-focus-visible:block"
+
+                className={`pointer-events-none absolute bottom-full z-10 mb-1 hidden min-w-36 rounded-md border bg-background p-2 text-xs shadow-md group-hover:block group-focus-visible:block ${
+                  i < trend.length / 2 ? "left-0" : "right-0"
+                }`}
               >
                 <span className="block text-muted-foreground">{monthName(m.month)}</span>
                 {(
