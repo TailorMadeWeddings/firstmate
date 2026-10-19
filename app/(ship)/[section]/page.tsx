@@ -1,10 +1,12 @@
 import { notFound } from "next/navigation";
 import { sections } from "@/lib/sections";
 
+const BUILT: string[] = ["ledger", "logbook"];
+
 // Sections that aren't built yet. Each gets its own folder once it is;
 // anything else is a 404 below.
 export const generateStaticParams = () =>
-  sections.filter((s) => s.slug !== "ledger").map((s) => ({ section: s.slug }));
+  sections.filter((s) => !BUILT.includes(s.slug)).map((s) => ({ section: s.slug }));
 
 export default async function Placeholder({ params }: { params: Promise<{ section: string }> }) {
   const { section } = await params;
