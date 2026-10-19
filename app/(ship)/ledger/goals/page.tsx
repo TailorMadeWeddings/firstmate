@@ -147,7 +147,16 @@ function GoalCard({
         <span className="tabular-nums">{money(goal.target_amount)}</span> · {percent}%
       </p>
       {!goal.completed_at && (
-        <p className={`text-sm ${ahead ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}`}>
+        <p
+          className={`text-sm ${
+            // No deadline means no pace, so neither on track nor behind.
+            perMonth === null && !reached
+              ? "text-muted-foreground"
+              : ahead
+                ? "text-emerald-700 dark:text-emerald-400"
+                : "text-amber-700 dark:text-amber-400"
+          }`}
+        >
           {reached
             ? "Target reached. Mark it done when you're ready."
             : perMonth === null
