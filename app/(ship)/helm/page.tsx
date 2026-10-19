@@ -31,7 +31,7 @@ async function Helm() {
         <p className="text-sm text-muted-foreground">
           The Helm is the shared screen in the kitchen. It shows the household view: no Ledger unless
           an owner unlocks it with their PIN, for up to {UNLOCK_MINUTES} minutes or until nobody has
-          touched it for {IDLE_MINUTES}.
+          touched it for {IDLE_MINUTES} minutes.
         </p>
       </header>
 
