@@ -17,7 +17,7 @@ export const metadata: Metadata = {
 const games = [
   {
     name: "500",
-    href: "/500",
+    href: "/games/500",
     suit: "♥",
     blurb: "Bid, call trumps and race your partner to 500.",
     players: "4 players · 2 teams",
@@ -29,6 +29,9 @@ export default function GamesHome() {
     <main className="min-h-screen flex flex-col items-center px-5 py-16">
       <div className="w-full max-w-3xl flex flex-col gap-10">
         <header className="relative">
+          <Link href="/" className="text-sm text-muted-foreground hover:underline">
+            ← First Mate
+          </Link>
           <div className="absolute right-0 top-0">
             <LogoutButton />
           </div>

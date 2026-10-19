@@ -349,7 +349,7 @@ export function Table({
       <header className="flex items-baseline justify-between gap-2">
         <div className="flex items-baseline gap-2 sm:gap-3">
           <Link
-            href="/500"
+            href="/games/500"
             className="whitespace-nowrap text-sm text-muted-foreground hover:underline"
           >
             ← 500

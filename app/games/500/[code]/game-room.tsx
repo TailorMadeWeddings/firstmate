@@ -110,7 +110,7 @@ function WaitingRoom({
   return (
     <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-5 px-4 py-6">
       <header className="flex items-baseline gap-3">
-        <Link href="/500" className="text-sm text-muted-foreground hover:underline">
+        <Link href="/games/500" className="text-sm text-muted-foreground hover:underline">
           ← 500
         </Link>
         <h1 className="text-2xl font-bold">Game {view.code}</h1>

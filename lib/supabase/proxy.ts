@@ -2,13 +2,8 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { hasEnvVars } from "../utils";
 
-/** rewriteTo serves a different route (the games site); it also makes "/" sign-in only. */
-export async function updateSession(request: NextRequest, rewriteTo?: URL) {
-  const pass = () =>
-    rewriteTo
-      ? NextResponse.rewrite(rewriteTo, { request })
-      : NextResponse.next({ request });
-  let supabaseResponse = pass();
+export async function updateSession(request: NextRequest) {
+  let supabaseResponse = NextResponse.next({ request });
 
   // If the env vars are not set, skip proxy check. You can remove this
   // once you setup the project.
@@ -31,7 +26,7 @@ export async function updateSession(request: NextRequest, rewriteTo?: URL) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value),
           );
-          supabaseResponse = pass();
+          supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options),
           );
@@ -50,7 +45,7 @@ export async function updateSession(request: NextRequest, rewriteTo?: URL) {
   const user = data?.claims;
 
   if (
-    (request.nextUrl.pathname !== "/" || rewriteTo) &&
+    request.nextUrl.pathname !== "/" &&
     !user &&
     !request.nextUrl.pathname.startsWith("/login") &&
     !request.nextUrl.pathname.startsWith("/auth")
