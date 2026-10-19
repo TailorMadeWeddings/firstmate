@@ -7,6 +7,8 @@ import {
   daysUntil,
   type Imported,
   forEntry,
+  onePerTransfer,
+  transfersById,
   monthly,
   notYetSaved,
   nextDue,
@@ -159,4 +161,16 @@ test("budget status", () => {
   assert.deepEqual(budgetStatus(900.1, 900), { percent: 100, left: -0.1, state: "over" });
   assert.deepEqual(budgetStatus(0.3, 0.1 + 0.2), { percent: 100, left: 0, state: "near" });
   assert.equal(budgetStatus(1350, 900).percent, 150);
+});
+
+test("transfers pair up and show once", () => {
+  const legs = [
+    { id: "1", account_id: "everyday", amount: -500, date: "2026-10-19", description: "Top up", transfer_id: "t1", goal_id: null },
+    { id: "2", account_id: "groceries", amount: -80, date: "2026-10-18", description: null, transfer_id: null },
+    { id: "3", account_id: "savings", amount: 500, date: "2026-10-19", description: "Top up", transfer_id: "t1", goal_id: "g" },
+  ];
+  assert.deepEqual(transfersById(legs), {
+    t1: { from: "everyday", to: "savings", amount: 500, date: "2026-10-19", note: "Top up", goalId: "g" },
+  });
+  assert.deepEqual(onePerTransfer(legs).map((l) => l.id), ["1", "2"]);
 });

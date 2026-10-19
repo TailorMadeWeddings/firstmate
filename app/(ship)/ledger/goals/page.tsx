@@ -159,6 +159,14 @@ function GoalCard({
       {!goal.completed_at && accounts.length > 0 && (
         <ActionForm action={contribute.bind(null, goal.id)} className="flex flex-wrap items-end gap-2">
           <Input name="amount" aria-label="Amount to add" inputMode="decimal" placeholder="Add 0.00" className="w-28" />
+          <NativeSelect name="from_account_id" aria-label="Moved from" defaultValue="" className="w-auto">
+            <option value="">Already there</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                From {a.name}
+              </option>
+            ))}
+          </NativeSelect>
           <NativeSelect
             name="account_id"
             aria-label="Account it's in"
@@ -167,7 +175,7 @@ function GoalCard({
           >
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
-                {a.name}
+                In {a.name}
               </option>
             ))}
           </NativeSelect>

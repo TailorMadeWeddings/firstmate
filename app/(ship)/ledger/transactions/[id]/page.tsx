@@ -28,12 +28,13 @@ async function EditTransaction({ params }: { params: Promise<{ id: string }> }) 
     loadCategories(),
     supabase
       .from("budget_transactions")
-      .select("id, date, amount, description, notes, account_id, category_id, goal_id")
+      .select("id, date, amount, description, notes, account_id, category_id, goal_id, transfer_id")
       .eq("id", id)
       .maybeSingle<Transaction>(),
   ]);
   if (!data) notFound();
-  // Goal contributions are managed on the goal itself.
+  // Transfers have their own page; other goal contributions are managed on the goal.
+  if (data.transfer_id) redirect(`/ledger/transfers/${data.transfer_id}`);
   if (data.goal_id) redirect("/ledger/goals");
 
   return (

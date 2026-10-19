@@ -7,6 +7,7 @@ import {
   type Category,
   UNITS,
   type MonthlyTotal,
+  type Transfer,
   type Unit,
   budgetStatus,
   daysUntil,
@@ -37,6 +38,7 @@ export type Transaction = {
   account_id: string;
   category_id: string | null;
   goal_id: string | null;
+  transfer_id: string | null;
 };
 
 export type Bill = {
@@ -291,6 +293,51 @@ export function BillFields({
         <input type="checkbox" name="autopay" defaultChecked={value?.autopay} className="size-4" />
         Paid automatically by the bank
       </label>
+    </div>
+  );
+}
+
+/** From, to, amount, date and an optional note, for a new transfer or an edit. */
+export function TransferFields({ accounts, value }: { accounts: Account[]; value?: Transfer }) {
+  const id = (name: string) => `${name}-${value ? "edit" : "new"}`;
+  const pick = (name: string, labelText: string, selected?: string) => (
+    <div className="grid gap-1">
+      <Label htmlFor={id(name)}>{labelText}</Label>
+      <NativeSelect id={id(name)} name={name} defaultValue={selected ?? ""} required>
+        <option value="" disabled>
+          Choose…
+        </option>
+        {accounts.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.name}
+          </option>
+        ))}
+      </NativeSelect>
+    </div>
+  );
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {pick("from_account_id", "From", value?.from)}
+      {pick("to_account_id", "To", value?.to)}
+      <div className="grid gap-1">
+        <Label htmlFor={id("amount")}>Amount</Label>
+        <Input
+          id={id("amount")}
+          name="amount"
+          inputMode="decimal"
+          placeholder="0.00"
+          defaultValue={value ? Number(value.amount).toFixed(2) : undefined}
+          required
+        />
+      </div>
+      <div className="grid gap-1">
+        <Label htmlFor={id("date")}>Date</Label>
+        <Input id={id("date")} name="date" type="date" defaultValue={value?.date ?? today()} />
+      </div>
+      <div className="grid gap-1 sm:col-span-2">
+        <Label htmlFor={id("note")}>Note (optional)</Label>
+        <Input id={id("note")} name="note" placeholder="Paying off the card" defaultValue={value?.note ?? ""} />
+      </div>
     </div>
   );
 }
