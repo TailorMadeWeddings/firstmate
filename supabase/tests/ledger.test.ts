@@ -235,6 +235,20 @@ test("ledger: monthly totals split money in and out, and skip goal savings", asy
   ]);
 });
 
+test("kitchen PIN hashes are invisible to every signed-in user", async () => {
+  const db = await setup();
+  await db.exec(`insert into kitchen_pins (profile_id, household_id, pin_hash) values ('${OWNER}', '${HOME}', 'salt:hash')`);
+  for (const id of [OWNER, TRUSTED, OUTSIDER, null]) {
+    assert.equal(await as(db, id, (tx) => count(tx, "kitchen_pins")), 0);
+    await assert.rejects(
+      as(db, id, (tx) =>
+        tx.query(`insert into kitchen_pins (profile_id, household_id, pin_hash) values ('${TRUSTED}', '${HOME}', 'x')`),
+      ),
+      /row-level security/,
+    );
+  }
+});
+
 test("ledger: constraints", async () => {
   const db = await setup();
   const insert = (sql: string) => as(db, OWNER, (tx) => tx.query(sql));
