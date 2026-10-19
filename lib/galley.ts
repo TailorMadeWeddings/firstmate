@@ -113,10 +113,19 @@ export function formatQuantity(n: number): string {
 /** The quantity for a different number of servings. */
 export const scaled = (quantity: number, from: number, to: number) => (quantity * to) / from;
 
-/** Back to one editable line: "1½ cup plain flour, sifted". */
+const PLURAL: Record<string, string> = {
+  cup: "cups", clove: "cloves", can: "cans", pinch: "pinches", bunch: "bunches", handful: "handfuls",
+  slice: "slices", sprig: "sprigs", packet: "packets", stick: "sticks", dash: "dashes",
+};
+
+/** "cup" for one or less, "cups" for more; abbreviations (g, tbsp…) never change. */
+export const unitFor = (unit: string | null, quantity: number | null) =>
+  unit && quantity !== null && quantity > 1 ? (PLURAL[unit] ?? unit) : unit;
+
+/** Back to one editable line: "1½ cups plain flour, sifted". */
 export function ingredientLine(i: Ingredient): string {
   const amount = i.quantity !== null ? formatQuantity(Number(i.quantity)) : "";
-  return [amount, i.unit ?? "", i.name].filter(Boolean).join(" ") + (i.notes ? `, ${i.notes}` : "");
+  return [amount, unitFor(i.unit, i.quantity) ?? "", i.name].filter(Boolean).join(" ") + (i.notes ? `, ${i.notes}` : "");
 }
 
 /** 75 → "1 hr 15 min" */

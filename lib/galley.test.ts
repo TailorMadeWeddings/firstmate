@@ -17,6 +17,7 @@ import {
   parseSteps,
   parseTags,
   scaled,
+  unitFor,
 } from "./galley.ts";
 
 test("ingredient lines split into quantity, unit, name and notes", () => {
@@ -39,7 +40,7 @@ test("ingredient lines split into quantity, unit, name and notes", () => {
 });
 
 test("ingredients turn back into the same editable line", () => {
-  for (const line of ["2 cup plain flour, sifted", "1½ tbsp olive oil", "500 g beef mince", "Salt, to taste", "⅓ cup cream"]) {
+  for (const line of ["2 cups plain flour, sifted", "1½ tbsp olive oil", "500 g beef mince", "Salt, to taste", "⅓ cup cream", "3 cloves garlic"]) {
     assert.equal(ingredientLine(parseIngredient(line)!), line);
   }
 });
@@ -69,6 +70,17 @@ test("quantities show as a cook writes them, and scale", () => {
   assert.equal(formatQuantity(scaled(2, 4, 6)), "3");
   assert.equal(formatQuantity(scaled(0.5, 4, 2)), "¼");
   assert.equal(formatQuantity(scaled(1, 3, 2)), "⅔");
+});
+
+test("units read naturally for the amount", () => {
+  assert.equal(unitFor("cup", 2.25), "cups");
+  assert.equal(unitFor("cup", 1), "cup");
+  assert.equal(unitFor("cup", 0.5), "cup");
+  assert.equal(unitFor("clove", 3), "cloves");
+  assert.equal(unitFor("pinch", 2), "pinches");
+  assert.equal(unitFor("tbsp", 2), "tbsp");
+  assert.equal(unitFor("g", 500), "g");
+  assert.equal(unitFor(null, 2), null);
 });
 
 test("tags and times", () => {

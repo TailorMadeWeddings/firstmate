@@ -2,7 +2,7 @@
 
 import { Minus, Plus } from "lucide-react";
 import { useState } from "react";
-import { type Ingredient, formatQuantity, scaled } from "@/lib/galley";
+import { type Ingredient, formatQuantity, scaled, unitFor } from "@/lib/galley";
 
 /** The ingredient list, recalculated for however many people you're feeding. */
 export function Ingredients({ ingredients, servings }: { ingredients: Ingredient[]; servings: number | null }) {
@@ -33,7 +33,8 @@ export function Ingredients({ ingredients, servings }: { ingredients: Ingredient
         {ingredients.map((i, n) => (
           <li key={n} className="flex gap-3 px-4 py-2.5">
             <span className="w-20 shrink-0 text-right font-semibold tabular-nums">
-              {i.quantity !== null && formatQuantity(scaled(i.quantity, base, serves))} {i.unit}
+              {i.quantity !== null && formatQuantity(scaled(i.quantity, base, serves))}{" "}
+              {unitFor(i.unit, i.quantity === null ? null : scaled(i.quantity, base, serves))}
             </span>
             <span>
               {i.name}

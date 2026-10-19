@@ -14,6 +14,7 @@ import {
   remaining,
   resumeTimer,
   startTimer,
+  unitFor,
 } from "@/lib/galley";
 
 type Props = { id: string; title: string; ingredients: Ingredient[]; steps: Step[] };
@@ -187,7 +188,7 @@ export function CookingMode({ id, title, ingredients, steps }: Props) {
               {ingredients.map((i, n) => (
                 <li key={n} className="flex gap-4">
                   <span className="w-28 shrink-0 text-right font-bold tabular-nums">
-                    {i.quantity !== null && formatQuantity(i.quantity)} {i.unit}
+                    {i.quantity !== null && formatQuantity(i.quantity)} {unitFor(i.unit, i.quantity)}
                   </span>
                   <span>
                     {i.name}
