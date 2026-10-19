@@ -1,0 +1,73 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import {
+  durationIn,
+  formatQuantity,
+  ingredientLine,
+  minutes,
+  parseIngredient,
+  parseIngredients,
+  parseSteps,
+  parseTags,
+  scaled,
+} from "./galley.ts";
+
+test("ingredient lines split into quantity, unit, name and notes", () => {
+  const cases: [string, ReturnType<typeof parseIngredient>][] = [
+    ["2 cups plain flour, sifted", { quantity: 2, unit: "cup", name: "plain flour", notes: "sifted" }],
+    ["1 1/2 tbsp olive oil", { quantity: 1.5, unit: "tbsp", name: "olive oil", notes: null }],
+    ["1½ tsp salt", { quantity: 1.5, unit: "tsp", name: "salt", notes: null }],
+    ["3/4 cup milk", { quantity: 0.75, unit: "cup", name: "milk", notes: null }],
+    ["½ onion, finely chopped", { quantity: 0.5, unit: null, name: "onion", notes: "finely chopped" }],
+    ["500g beef mince", { quantity: 500, unit: "g", name: "beef mince", notes: null }],
+    ["2 cloves garlic, crushed, or 1 tsp minced", { quantity: 2, unit: "clove", name: "garlic", notes: "crushed, or 1 tsp minced" }],
+    ["1 can of chickpeas", { quantity: 1, unit: "can", name: "chickpeas", notes: null }],
+    ["- 2 eggs", { quantity: 2, unit: null, name: "eggs", notes: null }],
+    ["Salt and pepper, to taste", { quantity: null, unit: null, name: "Salt and pepper", notes: "to taste" }],
+    ["2 large carrots", { quantity: 2, unit: null, name: "large carrots", notes: null }],
+    ["   ", null],
+  ];
+  for (const [line, want] of cases) assert.deepEqual(parseIngredient(line), want, line);
+  assert.equal(parseIngredients("2 eggs\n\n1 cup sugar\n").length, 2);
+});
+
+test("ingredients turn back into the same editable line", () => {
+  for (const line of ["2 cup plain flour, sifted", "1½ tbsp olive oil", "500 g beef mince", "Salt, to taste", "⅓ cup cream"]) {
+    assert.equal(ingredientLine(parseIngredient(line)!), line);
+  }
+});
+
+test("steps: one per line, numbering dropped, times picked up", () => {
+  const steps = parseSteps("1. Preheat the oven to 180C.\n\n2) Mix everything.\nStep 3: Bake for 25-30 minutes.\nRest for 1 hour before slicing");
+  assert.deepEqual(steps, [
+    { instruction: "Preheat the oven to 180C.", duration_seconds: null },
+    { instruction: "Mix everything.", duration_seconds: null },
+    { instruction: "Bake for 25-30 minutes.", duration_seconds: 1500 },
+    { instruction: "Rest for 1 hour before slicing", duration_seconds: 3600 },
+  ]);
+  assert.equal(durationIn("Simmer 90 secs"), 90);
+  assert.equal(durationIn("Cook 1.5 hrs"), 5400);
+  assert.equal(durationIn("Season well"), null);
+});
+
+test("quantities show as a cook writes them, and scale", () => {
+  assert.equal(formatQuantity(1.5), "1½");
+  assert.equal(formatQuantity(0.333), "⅓");
+  assert.equal(formatQuantity(2 / 3), "⅔");
+  assert.equal(formatQuantity(0.25), "¼");
+  assert.equal(formatQuantity(2), "2");
+  assert.equal(formatQuantity(1.999), "2");
+  assert.equal(formatQuantity(1.17), "1.17");
+  // 2 cups for 4 → for 6, and ½ tsp for 4 → for 2.
+  assert.equal(formatQuantity(scaled(2, 4, 6)), "3");
+  assert.equal(formatQuantity(scaled(0.5, 4, 2)), "¼");
+  assert.equal(formatQuantity(scaled(1, 3, 2)), "⅔");
+});
+
+test("tags and times", () => {
+  assert.deepEqual(parseTags("Quick, kid-friendly , quick,,"), ["quick", "kid-friendly"]);
+  assert.equal(minutes(75), "1 hr 15 min");
+  assert.equal(minutes(20), "20 min");
+  assert.equal(minutes(120), "2 hr");
+  assert.equal(minutes(0), null);
+});

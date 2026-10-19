@@ -1,17 +1,11 @@
 // Loading the Logbook: who's in the crew, and what's on between two dates.
 // Reads go through the signed-in user's client, so row-level security
 // decides what they see (crew only; Guests see nothing).
-import { notFound } from "next/navigation";
 import { type EventRow, type ExceptionRow, type Occurrence, crewColours, occurrences } from "@/lib/logbook";
-import { type Member, currentMember } from "@/lib/players";
-import { createClient } from "@/lib/supabase/server";
+import { currentCrew } from "@/lib/players";
 
-/** Owners and Trusted members. Guests get a 404, like the Ledger for non-owners. */
-export async function currentCrew(): Promise<Member> {
-  const member = await currentMember();
-  if (member.role === "guest") notFound();
-  return member;
-}
+export { currentCrew };
+import { createClient } from "@/lib/supabase/server";
 
 export type CrewMember = {
   /** "p:<profile id>" or "d:<dependent id>" */
