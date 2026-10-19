@@ -108,7 +108,7 @@ export async function createGame() {
     const { error } = await createAdminClient()
       .from("games_500")
       .insert({ code, created_by: user, seats: [user, null, null, null] });
-    if (!error) redirect(`/500/${code}`);
+    if (!error) redirect(`/games/500/${code}`);
     if (error.code !== "23505") throw error; // 23505: code taken, try another
   }
   throw new Error("Couldn't find a free game code");
@@ -116,5 +116,5 @@ export async function createGame() {
 
 export async function joinGame(formData: FormData) {
   const code = String(formData.get("code") ?? "").trim().toUpperCase();
-  redirect(/^[A-Z]{4}$/.test(code) ? `/500/${code}` : "/500");
+  redirect(/^[A-Z]{4}$/.test(code) ? `/games/500/${code}` : "/games/500");
 }

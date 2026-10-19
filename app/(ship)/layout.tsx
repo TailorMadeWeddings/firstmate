@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import Link from "next/link";
 import { Suspense } from "react";
 import { IdleLock } from "@/components/idle-lock";
@@ -61,11 +60,9 @@ export default function ShipLayout({ children }: { children: React.ReactNode }) 
 
 async function Nav({ layout }: { layout: "sidebar" | "tabs" }) {
   const member = await currentMember();
-  // ponytail: games live on the games. subdomain of whatever host we're on.
-  const host = (await headers()).get("host");
   const items: NavItem[] = [
     ...visibleSections(await canSeeLedger(member)).map((s) => ({ slug: s.slug, name: s.name, href: `/${s.slug}` })),
-    { slug: "games", name: "Games", href: `//games.${host}` },
+    { slug: "games", name: "Games", href: "/games" },
   ];
   return <ShipNav items={items} layout={layout} />;
 }

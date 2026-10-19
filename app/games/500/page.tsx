@@ -15,7 +15,7 @@ export default function FiveHundred() {
   return (
     <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-6 px-4 py-6">
       <header className="flex items-baseline gap-3">
-        <Link href="/" className="text-sm text-muted-foreground hover:underline">
+        <Link href="/games" className="text-sm text-muted-foreground hover:underline">
           ← Games
         </Link>
         <h1 className="text-2xl font-bold">500</h1>
@@ -71,7 +71,7 @@ async function Lobby() {
             {games.map((g) => (
               <li key={g.code}>
                 <Link
-                  href={`/500/${g.code}`}
+                  href={`/games/500/${g.code}`}
                   className="flex justify-between px-4 py-3 hover:bg-muted"
                 >
                   <span className="font-mono font-semibold">{g.code}</span>
