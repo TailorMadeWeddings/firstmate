@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Anchor } from "lucide-react";
 import { Suspense } from "react";
 import { IdleLock } from "@/components/idle-lock";
 import { LogoutButton } from "@/components/logout-button";
@@ -23,7 +24,7 @@ export default function ShipLayout({ children }: { children: React.ReactNode }) 
           aria-label="First Mate home"
           className="flex size-12 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-lg shadow-primary/20"
         >
-          <span className="font-serif text-2xl font-black italic">F</span>
+          <Anchor className="size-6" strokeWidth={2.5} />
         </Link>
         <Suspense>
           <Nav layout="sidebar" />
