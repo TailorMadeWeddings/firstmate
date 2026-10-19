@@ -1,15 +1,19 @@
 import type { Metadata } from "next";
-import { ChefHat, Clock, ExternalLink, Timer, Users } from "lucide-react";
+import { CalendarPlus, Check, ChefHat, Clock, ExternalLink, History, Plus, Timer, Users } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ActionForm } from "@/components/action-form";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { minutes } from "@/lib/galley";
-import { currentCrew } from "@/lib/players";
-import { deleteRecipe } from "../actions";
-import { loadRecipe } from "../data";
+import { dayKey } from "@/lib/logbook";
+import { currentMember } from "@/lib/players";
+import { deleteRecipe, fileRecipe, planMeal } from "../actions";
+import { accessTo, loadCollections, loadRecipe } from "../data";
 import { Ingredients } from "./ingredients";
+import { PhotoPicker } from "./photo-picker";
 
 export const metadata: Metadata = { title: "Recipe · Galley · First Mate" };
 
@@ -22,16 +26,24 @@ export default function RecipePage({ params }: { params: Promise<{ id: string }>
 }
 
 async function RecipeView({ params }: { params: Promise<{ id: string }> }) {
-  const member = await currentCrew();
+  const member = await currentMember();
   const { id } = await params;
-  const recipe = await loadRecipe(id);
+  const [recipe, collections] = await Promise.all([loadRecipe(id), loadCollections()]);
   if (!recipe) notFound();
   // Row-level security has the final say; this just hides buttons that wouldn't work.
   const canChange = member.role === "owner" || recipe.created_by === member.id;
+  const crew = member.role !== "guest";
+  // Collections it's in, and (for Captains and contributors) the ones it could go in.
+  const filing = collections.map((c) => ({
+    ...c,
+    filed: recipe.collections.includes(c.id),
+    canFile: accessTo(c, member) !== "read",
+  }));
   const facts = [
     recipe.prep_minutes ? { icon: Clock, label: "Prep", value: minutes(recipe.prep_minutes) } : null,
     recipe.cook_minutes ? { icon: Timer, label: "Cook", value: minutes(recipe.cook_minutes) } : null,
     recipe.servings ? { icon: Users, label: "Serves", value: String(recipe.servings) } : null,
+    recipe.cooked_at ? { icon: History, label: "Last cooked", value: ago(recipe.cooked_at) } : null,
   ].filter((f) => f !== null);
 
   return (
@@ -39,6 +51,25 @@ async function RecipeView({ params }: { params: Promise<{ id: string }> }) {
       <Link href="/galley" className="text-sm text-muted-foreground hover:underline">
         ← Galley
       </Link>
+
+      {(recipe.photo || canChange) && (
+        <div className="relative overflow-hidden rounded-2xl border bg-muted">
+          {recipe.photo ? (
+            // Private, signed links: next/image's optimiser can't fetch them anyway.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={recipe.photo} alt={recipe.title} className="aspect-[16/9] w-full object-cover" />
+          ) : (
+            <div className="flex aspect-[16/5] items-center justify-center" aria-hidden>
+              <span className="font-serif text-7xl font-black italic text-foreground/15">{recipe.title.slice(0, 1).toUpperCase()}</span>
+            </div>
+          )}
+          {canChange && (
+            <div className="absolute bottom-3 left-3">
+              <PhotoPicker recipeId={recipe.id} hasPhoto={Boolean(recipe.photo)} />
+            </div>
+          )}
+        </div>
+      )}
 
       <header className="flex flex-col gap-3 border-b pb-6">
         <h1 className="text-4xl md:text-5xl">{recipe.title}</h1>
@@ -56,13 +87,33 @@ async function RecipeView({ params }: { params: Promise<{ id: string }> }) {
             </a>
           )}
         </div>
-        {recipe.steps.length > 0 && (
-          <Button asChild size="lg" className="self-start">
-            <Link href={`/galley/${recipe.id}/cook`}>
-              <ChefHat aria-hidden /> Cook this
-            </Link>
-          </Button>
-        )}
+        <div className="flex flex-wrap items-start gap-3">
+          {recipe.steps.length > 0 && (
+            <Button asChild size="lg">
+              <Link href={`/galley/${recipe.id}/cook`}>
+                <ChefHat aria-hidden /> Cook this
+              </Link>
+            </Button>
+          )}
+          {crew && (
+            <details className="group rounded-lg border bg-card">
+              <summary className="flex h-10 cursor-pointer list-none items-center gap-2 px-4 text-sm font-semibold">
+                <CalendarPlus className="size-4" aria-hidden /> Add to meal plan
+              </summary>
+              <ActionForm action={planMeal.bind(null, recipe.id)} reset={false} className="flex flex-wrap items-end gap-3 border-t p-4">
+                <div className="grid gap-1">
+                  <Label htmlFor="meal-date">Day</Label>
+                  <Input id="meal-date" name="date" type="date" defaultValue={dayKey(new Date())} required />
+                </div>
+                <div className="grid gap-1">
+                  <Label htmlFor="meal-time">Start cooking</Label>
+                  <Input id="meal-time" name="time" type="time" defaultValue="17:30" required />
+                </div>
+                <Button>Add to the Logbook</Button>
+              </ActionForm>
+            </details>
+          )}
+        </div>
         {recipe.tags.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {recipe.tags.map((t) => (
@@ -73,6 +124,36 @@ async function RecipeView({ params }: { params: Promise<{ id: string }> }) {
           </div>
         )}
       </header>
+
+      {filing.some((c) => c.filed || c.canFile) && (
+        <section className="flex flex-col gap-2" aria-labelledby="collections">
+          <h2 id="collections" className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+            Collections
+          </h2>
+          <ul className="flex flex-wrap gap-2">
+            {filing
+              .filter((c) => c.filed || c.canFile)
+              .map((c) => (
+                <li key={c.id} className="flex items-center">
+                  {c.canFile ? (
+                    <ActionForm action={fileRecipe.bind(null, c.id, recipe.id, !c.filed)} className="flex flex-wrap items-center gap-2">
+                      <button
+                        aria-pressed={c.filed}
+                        className="flex items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground"
+                      >
+                        {c.filed ? <Check className="size-3.5" aria-hidden /> : <Plus className="size-3.5" aria-hidden />} {c.name}
+                      </button>
+                    </ActionForm>
+                  ) : (
+                    <Link href={`/galley/collections/${c.id}`} className="rounded-full bg-muted px-3 py-1 text-sm hover:bg-muted/70">
+                      {c.name}
+                    </Link>
+                  )}
+                </li>
+              ))}
+          </ul>
+        </section>
+      )}
 
       {recipe.ingredients.length > 0 && <Ingredients ingredients={recipe.ingredients} servings={recipe.servings} />}
 
@@ -109,4 +190,13 @@ async function RecipeView({ params }: { params: Promise<{ id: string }> }) {
       )}
     </article>
   );
+}
+
+/** "today", "yesterday", "5 days ago", or the date. */
+function ago(at: string) {
+  const days = Math.round((Date.parse(`${dayKey(new Date())}T00:00:00Z`) - Date.parse(`${dayKey(new Date(at))}T00:00:00Z`)) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days} days ago`;
+  return new Date(at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric", timeZone: "Australia/Sydney" });
 }

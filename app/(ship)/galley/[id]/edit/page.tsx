@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ActionForm } from "@/components/action-form";
 import { Button } from "@/components/ui/button";
-import { currentCrew } from "@/lib/players";
+import { currentMember } from "@/lib/players";
 import { saveRecipe } from "../../actions";
 import { loadRecipe } from "../../data";
 import { RecipeFields } from "../../recipe-fields";
@@ -20,7 +20,7 @@ export default function EditRecipePage({ params }: { params: Promise<{ id: strin
 }
 
 async function EditRecipe({ params }: { params: Promise<{ id: string }> }) {
-  await currentCrew();
+  await currentMember();
   const { id } = await params;
   const recipe = await loadRecipe(id);
   if (!recipe) notFound();

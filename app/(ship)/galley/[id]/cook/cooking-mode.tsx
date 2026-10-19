@@ -16,6 +16,7 @@ import {
   startTimer,
   unitFor,
 } from "@/lib/galley";
+import { markCooked } from "../../actions";
 
 type Props = { id: string; title: string; ingredients: Ingredient[]; steps: Step[] };
 
@@ -233,9 +234,10 @@ export function CookingMode({ id, title, ingredients, steps }: Props) {
               {page === 0 ? "Start cooking" : "Next step"} <ChevronRight className="size-8" aria-hidden />
             </button>
           ) : (
-            <Link href={`/galley/${id}`} className={`${big} bg-primary text-primary-foreground`}>
-              Done
-            </Link>
+            // Finishing notes it was cooked, for "recently cooked"; the X up top just leaves.
+            <form action={markCooked.bind(null, id)} className="flex flex-1">
+              <button className={`${big} bg-primary text-primary-foreground`}>Done</button>
+            </form>
           )}
         </div>
       </footer>

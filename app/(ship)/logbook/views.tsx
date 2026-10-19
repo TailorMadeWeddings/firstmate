@@ -1,7 +1,7 @@
 // The Logbook's three views, after the AI Studio mock-up: the week grid
 // (also the day view, with one column), and the agenda list for phones.
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { ChefHat, Plus } from "lucide-react";
 import { TZ, addDays, dayKey, describeRepeat, lanes, startOfDay, textOn, wallOf } from "@/lib/logbook";
 import type { CrewMember, Entry } from "./data";
 
@@ -35,6 +35,11 @@ export function Avatars({ keys, crew, size = "sm" }: { keys: string[]; crew: Cre
       ))}
     </span>
   );
+}
+
+/** Marks a meal: an event for cooking a recipe. */
+function Meal({ big = false }: { big?: boolean }) {
+  return <ChefHat className={`mr-1 inline align-[-0.15em] ${big ? "size-4" : "size-3.5"}`} aria-label="Meal:" />;
 }
 
 /** The first assignee's colour marks the event; no one assigned is neutral ink. */
@@ -145,7 +150,10 @@ export function TimeGrid({
                         background: `color-mix(in srgb, ${colour} 14%, hsl(var(--card)))`,
                       }}
                     >
-                      <span className={`block font-bold leading-tight ${big ? "text-base" : "text-sm"} line-clamp-2`}>{e.title}</span>
+                      <span className={`block font-bold leading-tight ${big ? "text-base" : "text-sm"} line-clamp-2`}>
+                        {e.recipeId && <Meal big={big} />}
+                        {e.title}
+                      </span>
                       {/* Time and who share a line, so even an hour-long card shows both. */}
                       <span className="flex items-center justify-between gap-1">
                         <span className={`min-w-0 truncate text-muted-foreground ${big ? "text-sm" : "text-[11px]"}`}>
@@ -215,7 +223,10 @@ export function Agenda({ from, days, entries, crew }: { from: string; days: numb
                       {e.allDay ? "All day" : time(e.start)}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-semibold">{e.title}</span>
+                      <span className="block truncate font-semibold">
+                        {e.recipeId && <Meal />}
+                        {e.title}
+                      </span>
                       <span className="block truncate text-xs text-muted-foreground">
                         {[e.location, describeRepeat(e.rule)].filter(Boolean).join(" · ")}
                       </span>
