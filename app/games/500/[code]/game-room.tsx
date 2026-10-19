@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { type RoomView } from "@/lib/games/500/room";
 import { createClient } from "@/lib/supabase/client";
@@ -13,9 +13,14 @@ export function GameRoom({ initial }: { initial: RoomView }) {
   const [busy, setBusy] = useState(false);
   const { code } = initial;
 
-  // Replies can arrive out of order; keep the newest.
+  // Replies can arrive out of order; keep the newest. A copy of what's already
+  // showing is dropped too, or it would restart the computer players' pause.
+  const latest = useRef(initial.version);
   const show = useCallback((next: RoomView | null) => {
-    if (next) setView((v) => (next.version >= v.version ? next : v));
+    if (next && next.version > latest.current) {
+      latest.current = next.version;
+      setView(next);
+    }
   }, []);
 
   const run = useCallback(
@@ -33,13 +38,16 @@ export function GameRoom({ initial }: { initial: RoomView }) {
     [code, show],
   );
 
-  // Refresh when anyone moves, and when a phone wakes up.
+  // Refresh when anyone else moves (our own moves are already showing), and
+  // when a phone wakes up.
   useEffect(() => {
     const supabase = createClient();
     const refresh = () => getRoom(code).then(show, () => {});
     const channel = supabase
       .channel(`game-500:${code}`)
-      .on("broadcast", { event: "update" }, refresh)
+      .on("broadcast", { event: "update" }, ({ payload }) => {
+        if (payload?.version > latest.current) refresh();
+      })
       .subscribe();
     const onVisible = () => document.visibilityState === "visible" && refresh();
     document.addEventListener("visibilitychange", onVisible);
@@ -63,7 +71,7 @@ export function GameRoom({ initial }: { initial: RoomView }) {
     const finishedTrick = g.phase === "playing" && !g.trick.length && g.lastTrick;
     const t = setTimeout(
       () => run(() => advance(code, view.version)),
-      finishedTrick ? 1500 : 700,
+      finishedTrick ? 1500 : 500,
     );
     return () => clearTimeout(t);
   }, [view, code, run]);

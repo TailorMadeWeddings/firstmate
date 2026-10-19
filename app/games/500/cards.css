@@ -1,0 +1,127 @@
+/* Card backs, the fanned hand, and cards moving on and off the table. */
+
+/* Cards overlap just enough to keep the hand on one row, however many there are. */
+.hand {
+  container-type: inline-size;
+  display: flex;
+  justify-content: center;
+}
+.hand > * + * {
+  margin-left: min(0.25rem, (100cqw - var(--n) * 3.5rem) / (var(--n) - 1));
+}
+
+@keyframes card-in {
+  from {
+    transform: translate(var(--from-x), var(--from-y)) scale(0.8);
+    opacity: 0;
+  }
+}
+@keyframes trick-out {
+  to {
+    transform: translate(var(--to-x), var(--to-y)) scale(0.6);
+    opacity: 0;
+  }
+}
+.card-in {
+  animation: card-in 220ms ease-out;
+}
+/* Once a trick is won, it sits for a moment, then sweeps to the winner. */
+.card-in.trick-out {
+  animation:
+    card-in 220ms ease-out,
+    trick-out 350ms ease-in 900ms forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-in,
+  .card-in.trick-out {
+    animation: none;
+  }
+}
+
+/* Felt with a soft overhead light, a fine weave, and a wooden rim. */
+.felt {
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 42%, rgb(255 255 255 / 0.13), transparent 70%),
+    radial-gradient(ellipse at 50% 50%, transparent 55%, rgb(0 0 0 / 0.4)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    #0f6b4f;
+  box-shadow:
+    inset 0 0 0 7px #6b4423,
+    inset 0 0 0 8px #3d2510,
+    inset 0 0 0 9px rgb(255 255 255 / 0.12),
+    inset 0 10px 30px rgb(0 0 0 / 0.45),
+    0 12px 30px -8px rgb(0 0 0 / 0.45);
+}
+
+/* Card stock: a touch of warmth and a fine inner line. */
+.card-face {
+  background: linear-gradient(160deg, #fff 0%, #fbfaf7 60%, #f1eee6 100%);
+  box-shadow:
+    inset 0 0 0 2px #fff,
+    inset 0 0 0 3px rgb(0 0 0 / 0.05),
+    0 2px 4px rgb(0 0 0 / 0.25),
+    0 6px 12px -4px rgb(0 0 0 / 0.25);
+}
+
+.card-back {
+  background:
+    repeating-linear-gradient(45deg, transparent 0 3px, rgb(255 255 255 / 0.16) 3px 4px),
+    repeating-linear-gradient(-45deg, transparent 0 3px, rgb(255 255 255 / 0.16) 3px 4px),
+    radial-gradient(circle at 50% 40%, #be123c, #881337);
+  box-shadow:
+    inset 0 0 0 1.5px #fff,
+    inset 0 0 0 2.5px #e5c07b,
+    0 1px 2px rgb(0 0 0 / 0.35);
+}
+
+/* Cards fly in from the deck in the middle of the table when a hand is dealt. */
+@keyframes deal-in {
+  from {
+    transform: translate(var(--deal-x, 0), var(--deal-y, -14rem)) rotate(-25deg) scale(0.5);
+    opacity: 0;
+  }
+}
+.deal-in {
+  animation: deal-in 380ms cubic-bezier(0.2, 0.8, 0.3, 1.1) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+/* Whoever's turn it is glows. */
+@keyframes turn-glow {
+  50% {
+    box-shadow: 0 0 0 5px rgb(252 211 77 / 0.25), 0 0 16px 4px rgb(252 211 77 / 0.55);
+  }
+}
+.turn-glow {
+  animation: turn-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes confetti-fall {
+  from {
+    transform: translateY(-10vh) rotate(0);
+  }
+  to {
+    transform: translateY(110vh) rotate(var(--spin));
+  }
+}
+.confetti {
+  position: fixed;
+  top: 0;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  pointer-events: none;
+  animation: confetti-fall var(--fall) linear var(--wait) 3 both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deal-in,
+  .turn-glow,
+  .confetti {
+    animation: none;
+  }
+  .confetti {
+    display: none;
+  }
+}

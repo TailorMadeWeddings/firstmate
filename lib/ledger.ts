@@ -56,6 +56,81 @@ export function forEntry(all: Category[], recentIds: (string | null)[]) {
   );
 }
 
+export type Imported = { date: string; amount: string; description: string };
+
+/** One CSV line's fields. Handles quoted fields with commas and "" in them. */
+function csvFields(line: string) {
+  const out: string[] = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quoted) {
+      if (ch !== '"') cur += ch;
+      else if (line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else quoted = false;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ",") {
+      out.push(cur);
+      cur = "";
+    } else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+/**
+ * A NetBank CSV export: no header, one transaction per line as
+ *   19/10/2026,"-12.50","WOOLWORTHS 1234 SYDNEY","+1,234.56"
+ * (date, signed amount, description, balance after). Returns the rows, or
+ * an error naming the first line that doesn't fit, so nothing is silently
+ * dropped. A header line and $0.00 lines are skipped.
+ */
+export function parseCommBankCsv(csv: string): Imported[] | string {
+  const rows: Imported[] = [];
+  const lines = csv.replace(/^﻿/, "").split(/\r?\n/);
+  for (const [i, line] of lines.entries()) {
+    if (!line.trim()) continue;
+    const [d, a, desc] = csvFields(line);
+    const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(d.trim());
+    if (!m) {
+      if (i === 0 && !/\d/.test(d)) continue; // a header someone added
+      return `Line ${i + 1} doesn't start with a date like 19/10/2026. Is this a CommBank CSV?`;
+    }
+    const date = `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+    const t = new Date(date);
+    if (Number.isNaN(+t) || t.toISOString().slice(0, 10) !== date) return `Line ${i + 1} has an impossible date.`;
+    const amount = parseAmount((a ?? "").replace(/^\+/, ""), true);
+    if (amount === null) return `Line ${i + 1} has an amount that isn't a number.`;
+    if (Number(amount) === 0) continue;
+    rows.push({ date, amount, description: (desc ?? "").replace(/\s+/g, " ").trim() });
+  }
+  return rows.length ? rows : "That file has no transactions in it.";
+}
+
+/**
+ * The imported rows not already in the account, so importing overlapping
+ * exports twice is harmless. Matches on date, amount and description, and
+ * counts: two identical $5 coffees in the CSV and one already saved → one
+ * new one.
+ */
+export function notYetSaved(
+  rows: Imported[],
+  existing: { date: string; amount: number | string; description: string | null }[],
+) {
+  const key = (r: { date: string; amount: number | string; description: string | null }) =>
+    `${r.date}|${Number(r.amount).toFixed(2)}|${r.description ?? ""}`;
+  const seen = new Map<string, number>();
+  for (const r of existing) seen.set(key(r), (seen.get(key(r)) ?? 0) + 1);
+  return rows.filter((r) => {
+    const n = seen.get(key(r)) ?? 0;
+    if (n > 0) seen.set(key(r), n - 1);
+    return n === 0;
+  });
+}
+
 // ---------- bill schedules ----------
 // ponytail: only "every N weeks / months / years" RRULEs, which is all the
 // bill form makes. Use an RRULE library if bills ever need more.

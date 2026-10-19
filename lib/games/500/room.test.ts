@@ -38,6 +38,7 @@ test("you see your own cards and nobody else's", () => {
   const view = viewFor(room, "ben", { ben: "Ben", mum: "Mum" });
   assert.deepEqual(view.game?.hand, room.state!.hands[0]);
   assert.deepEqual(view.players, ["Ben", null, "Mum", null]);
+  assert.deepEqual(view.game?.counts, [10, 10, 10, 10]);
   assert.equal(view.seat, 0);
   assert.ok(view.isHost);
   const json = JSON.stringify(view);

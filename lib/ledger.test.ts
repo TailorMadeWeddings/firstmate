@@ -5,11 +5,14 @@ import {
   addMonths,
   budgetStatus,
   daysUntil,
+  type Imported,
   forEntry,
   monthly,
+  notYetSaved,
   nextDue,
   pace,
   parseAmount,
+  parseCommBankCsv,
   period,
   ruleFor,
   scheduleLabel,
@@ -46,6 +49,31 @@ test("entry forms list recent categories first and hide archived ones", () => {
   ];
   const names = forEntry(all, ["g", null, "f", "g"]).map((x) => x.id);
   assert.deepEqual(names, ["g", "f", "e", "t"]);
+});
+
+test("CommBank CSVs parse, and bad ones say which line", () => {
+  const csv =
+    '﻿19/10/2026,"-12.50","WOOLWORTHS 1234  SYDNEY AU","+1,234.56"\r\n' +
+    '1/9/2026,"+1,500.00","Salary, ACME ""PTY"" LTD","+1,247.06"\r\n' +
+    '2/9/2026,"0.00","Interest","+1,247.06"\r\n\r\n';
+  assert.deepEqual(parseCommBankCsv(csv), [
+    { date: "2026-10-19", amount: "-12.50", description: "WOOLWORTHS 1234 SYDNEY AU" },
+    { date: "2026-09-01", amount: "1500.00", description: 'Salary, ACME "PTY" LTD' },
+  ]);
+  assert.equal((parseCommBankCsv("Date,Amount,Description,Balance\n" + csv) as Imported[]).length, 2);
+  assert.match(parseCommBankCsv(csv + "oops,1,x,1") as string, /^Line 5/);
+  assert.match(parseCommBankCsv('31/02/2026,"-1.00","x","0"') as string, /impossible date/);
+  assert.match(parseCommBankCsv('1/13/2026,"-1.00","x","0"') as string, /impossible date/);
+  assert.match(parseCommBankCsv('1/2/2026,"lots","x","0"') as string, /amount/);
+  assert.equal(parseCommBankCsv(""), "That file has no transactions in it.");
+});
+
+test("re-importing skips rows already saved, counting duplicates", () => {
+  const coffee = { date: "2026-10-19", amount: "-5.00", description: "CAFE" };
+  const rows = [coffee, coffee, { ...coffee, amount: "-6.00" }];
+  const saved = [{ date: "2026-10-19", amount: -5, description: "CAFE" }];
+  assert.deepEqual(notYetSaved(rows, saved), [coffee, { ...coffee, amount: "-6.00" }]);
+  assert.deepEqual(notYetSaved(rows, [...saved, ...saved, { ...saved[0], amount: -6 }]), []);
 });
 
 test("bill schedules land on the right dates", () => {
