@@ -84,6 +84,13 @@ function chime() {
   osc.stop(t + 0.35);
 }
 
+/** A bid as a screen reader should say it, e.g. "6 spades, 40 points". */
+function bidSpoken(b: Bid) {
+  const t = trumpOf(b);
+  const name = isMisere(b) ? bidLabel(b) : `${parseInt(b)} ${t === "NT" ? "no trumps" : SUIT_NAME[t]}`;
+  return `${name}, ${bidValue(b)} points`;
+}
+
 function cardName(c: Card) {
   if (c === JOKER) return "the joker";
   return `${rankOf(c) === "T" ? "10" : rankOf(c)}${SYMBOL[c[1] as Suit]}`;
@@ -196,6 +203,7 @@ export function Table({
   const [namingJoker, setNamingJoker] = useState(false);
   // First tap lifts a card, a second tap plays it, so a slip doesn't throw a card away.
   const [selected, setSelected] = useState<Card | null>(null);
+  const [pending, setPending] = useState<Card | null>(null);
   const game = view.game!;
   const { phase, contract, turn } = game;
 
@@ -208,6 +216,7 @@ export function Table({
     setDiscards([]);
     setNamingJoker(false);
     setSelected(null);
+    setPending(action.type === "play" ? action.card : null);
   };
 
   const trump: Trump = contract && phase !== "bidding" ? trumpOf(contract.bid) : "NT";
@@ -253,8 +262,12 @@ export function Table({
   const [peekAt, setPeekAt] = useState<string | null>(null);
   const canPeek = phase === "playing" && game.lastTrick !== null;
   const peeking = canPeek && peekAt === trickId;
-  const between = !game.trick.length || peeking; // showing a finished trick
-  const shown = between ? (game.lastTrick?.plays ?? []) : game.trick;
+  // Your card goes down the moment you play it, not when the server answers.
+  const playing = busy && pending && game.hand.includes(pending) ? pending : null;
+  const trickNow = playing ? [...game.trick, { seat: view.seat, card: playing }] : game.trick;
+  const hand = playing ? game.hand.filter((c) => c !== playing) : game.hand;
+  const between = !trickNow.length || peeking; // showing a finished trick
+  const shown = between ? (game.lastTrick?.plays ?? []) : trickNow;
   const trickWonBy = between ? (game.lastTrick?.winner ?? null) : null;
   const place = (seat: number) => (seat - me + 4) % 4;
 
@@ -462,6 +475,7 @@ export function Table({
                       variant="outline"
                       disabled={!canBid(game, b)}
                       title={`${bidValue(b)} points`}
+                      aria-label={bidSpoken(b)}
                       className={cn(t !== "NT" && isRed(t) && "text-red-600")}
                       onClick={() => send({ type: "bid", bid: b })}
                     >
@@ -478,6 +492,7 @@ export function Table({
                     variant="outline"
                     disabled={!canBid(game, b)}
                     title={`${bidValue(b)} points`}
+                    aria-label={bidSpoken(b)}
                     onClick={() => send({ type: "bid", bid: b })}
                   >
                     {bidLabel(b)}
@@ -545,9 +560,9 @@ export function Table({
       <section
         aria-label="Your hand"
         className="hand pt-3"
-        style={{ "--n": game.hand.length } as React.CSSProperties}
+        style={{ "--n": hand.length } as React.CSSProperties}
       >
-        {sortHand(game.hand, trump).map((c) => {
+        {sortHand(hand, trump).map((c) => {
           const playable = phase === "playing" && myTurn && legal.includes(c) && !namingJoker;
           const discarding = phase === "kitty" && myTurn;
           return (

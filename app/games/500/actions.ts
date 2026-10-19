@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { type Action } from "@/lib/games/500/rules";
 import {
   type Room,
@@ -26,13 +27,16 @@ async function load(code: string): Promise<Room | null> {
   return data;
 }
 
-async function view(room: Room, user: string): Promise<RoomView> {
-  const ids = room.seats.filter((id) => id !== null);
+async function namesFor(seats: Room["seats"]): Promise<Record<string, string>> {
   const { data } = await createAdminClient()
     .from("profiles")
     .select("id, display_name")
-    .in("id", ids);
-  return viewFor(room, user, Object.fromEntries((data ?? []).map((p) => [p.id, p.display_name])));
+    .in("id", seats.filter((id) => id !== null));
+  return Object.fromEntries((data ?? []).map((p) => [p.id, p.display_name]));
+}
+
+async function view(room: Room, user: string): Promise<RoomView> {
+  return viewFor(room, user, await namesFor(room.seats));
 }
 
 /**
@@ -44,15 +48,15 @@ async function change(
   code: string,
   fn: (room: Room, user: string) => Room | null,
 ): Promise<RoomView> {
-  const user = await currentUserId();
-  const room = await load(code);
+  // Independent lookups run side by side: each one is a trip to the database.
+  const [user, room] = await Promise.all([currentUserId(), load(code)]);
   if (!room) throw new Error("No such game");
   const next = fn(room, user);
   if (!next) return view(room, user);
 
   const db = createAdminClient();
   const version = room.version + 1;
-  const { data, error } = await db
+  const save = db
     .from("games_500")
     .update({
       status: next.status,
@@ -65,15 +69,15 @@ async function change(
     .eq("code", room.code)
     .eq("version", room.version)
     .select("code");
+  const [{ data, error }, names] = await Promise.all([save, namesFor(next.seats)]);
   if (error) throw error;
   if (!data.length) throw new Error("Someone else moved first");
-  await db.channel(`game-500:${room.code}`).httpSend("update", { version });
-  return view({ ...next, version }, user);
+  after(() => db.channel(`game-500:${room.code}`).httpSend("update", { version }));
+  return viewFor({ ...next, version }, user, names);
 }
 
 export async function getRoom(code: string): Promise<RoomView | null> {
-  const user = await currentUserId();
-  const room = await load(code);
+  const [user, room] = await Promise.all([currentUserId(), load(code)]);
   return room && view(room, user);
 }
 

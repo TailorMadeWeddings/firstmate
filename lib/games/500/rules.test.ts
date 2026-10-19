@@ -82,3 +82,14 @@ test("computer players finish whole games without an illegal move", () => {
     }
   }
 });
+
+test("computer players bid no-trumps on stoppers and misère on rubbish", () => {
+  const s = newGame(); // seat 0 bids first
+  s.hands[0] = [JOKER, "AS", "AC", "AD", "AH", "KS", "KC", "KD", "5H", "6S"];
+  // Joker, four aces and three kings: worth nine tricks with partner's help, so bid it now.
+  assert.deepEqual(botAction(s, 0), { type: "bid", bid: "9NT" });
+
+  s.contract = { seat: 3, bid: "7S" }; // misère only goes over a seven
+  s.hands[0] = ["4H", "5H", "6H", "5D", "6D", "7C", "5S", "6S", "7S", "8D"];
+  assert.deepEqual(botAction(s, 0), { type: "bid", bid: "MIS" });
+});
