@@ -32,10 +32,10 @@ const SUIT_NAME: Record<Suit, string> = { S: "spades", C: "clubs", D: "diamonds"
 const DISPLAY_ORDER: Suit[] = ["S", "H", "C", "D"]; // alternate colours in your hand
 // Screen places count clockwise from you at the bottom: bottom, left, top, right.
 const SEAT_PLACES = [
-  "bottom-2 left-1/2 -translate-x-1/2",
-  "left-2 top-1/2 -translate-y-1/2",
-  "top-2 left-1/2 -translate-x-1/2",
-  "right-2 top-1/2 -translate-y-1/2",
+  "bottom-3 left-1/2 -translate-x-1/2",
+  "left-3 top-1/2 -translate-y-1/2",
+  "top-3 left-1/2 -translate-x-1/2",
+  "right-3 top-1/2 -translate-y-1/2",
 ];
 /** Which way each place is from the middle of the table. */
 const DIRS = [
@@ -141,7 +141,7 @@ export function PlayingCard({
       aria-pressed={onClick && raised !== undefined ? raised : undefined}
       style={style}
       className={cn(
-        "relative block h-20 w-14 shrink-0 select-none rounded-lg border border-neutral-300 bg-white shadow-md transition",
+        "card-face relative block h-20 w-14 shrink-0 select-none rounded-lg transition",
         joker || isRed(suit) ? "text-red-600" : "text-neutral-900",
         dim && "brightness-[.7]",
         raised && "-translate-y-3 ring-2 ring-sky-500",
@@ -154,16 +154,32 @@ export function PlayingCard({
       <span className="absolute inset-0 flex items-center justify-center">
         {joker ? (
           <span className="flex flex-col items-center leading-none">
-            <span className="text-3xl">★</span>
+            <svg viewBox="0 0 24 24" className="h-9 w-9 drop-shadow-sm" aria-hidden>
+              <defs>
+                <linearGradient id="joker-star" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stopColor="#f59e0b" />
+                  <stop offset="1" stopColor="#dc2626" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M12 1.5l3.1 6.6 7.2.9-5.3 5 1.4 7.1L12 17.6 5.6 21.1 7 14l-5.3-5 7.2-.9z"
+                fill="url(#joker-star)"
+              />
+            </svg>
             <span className="text-[8px] font-bold tracking-widest">JOKER</span>
           </span>
         ) : face ? (
           <span
             className={cn(
-              "flex h-12 w-8 flex-col items-center justify-center rounded border font-serif leading-none",
-              isRed(suit) ? "border-red-200 bg-red-50" : "border-neutral-300 bg-neutral-100",
+              "flex h-12 w-8 flex-col items-center justify-center rounded border border-amber-400/80 bg-gradient-to-b font-serif leading-none shadow-inner",
+              isRed(suit) ? "from-rose-50 to-amber-50" : "from-slate-100 to-amber-50",
             )}
           >
+            {rank !== "J" && (
+              <svg viewBox="0 0 24 14" className="mb-0.5 h-2 w-4 text-amber-500" aria-hidden>
+                <path d="M2 13 1 3l6 5 5-7 5 7 6-5-1 10z" fill="currentColor" />
+              </svg>
+            )}
             <span className="text-xl font-bold">{rank}</span>
             <span className="text-sm">{pip}</span>
           </span>
@@ -176,7 +192,8 @@ export function PlayingCard({
 }
 
 /** Face-down cards fanned out, one per card a player is holding. */
-function CardFan({ count, dim }: { count: number; dim?: boolean }) {
+function CardFan({ count, dim, place }: { count: number; dim?: boolean; place: number }) {
+  const [dx, dy] = DIRS[place];
   return (
     <div
       role="img"
@@ -184,7 +201,13 @@ function CardFan({ count, dim }: { count: number; dim?: boolean }) {
       className={cn("flex h-7", dim && "opacity-40")}
     >
       {Array.from({ length: count }, (_, i) => (
-        <div key={i} className={cn("card-back h-7 w-5 rounded-sm", i > 0 && "-ml-3.5")} />
+        <div
+          key={i}
+          className={cn("card-back deal-in h-7 w-5 rounded-sm", i > 0 && "-ml-3.5")}
+          style={
+            { "--i": i, "--deal-x": `${-dx * 7}rem`, "--deal-y": `${-dy * 7}rem` } as React.CSSProperties
+          }
+        />
       ))}
     </div>
   );
@@ -334,9 +357,9 @@ export function Table({
 
       <section
         aria-label="Table"
-        className="relative h-[21rem] overflow-hidden rounded-2xl bg-emerald-800 text-emerald-50 shadow-inner"
+        className="felt relative h-[21rem] overflow-hidden rounded-2xl text-emerald-50"
       >
-        <div className="absolute left-3 top-3 text-xs">
+        <div className="absolute left-4 top-4 text-xs">
           {contract && phase !== "bidding" ? (
             <>
               <div className="text-sm font-semibold">
@@ -376,12 +399,12 @@ export function Table({
             className={cn("absolute flex flex-col items-center gap-1", SEAT_PLACES[place(seat)])}
           >
             {seat !== view.seat && (
-              <CardFan count={game.counts[seat]} dim={sitsOut(game, seat)} />
+              <CardFan count={game.counts[seat]} dim={sitsOut(game, seat)} place={place(seat)} />
             )}
             <div
               className={cn(
                 "max-w-20 truncate rounded-full px-2 py-0.5 text-xs font-semibold",
-                active && turn === seat && "bg-amber-300 text-amber-950",
+                active && turn === seat && "turn-glow bg-amber-300 text-amber-950",
               )}
             >
               {nameOf(seat)}
@@ -437,6 +460,7 @@ export function Table({
 
         {phase === "gameOver" && (
           <div className="flex flex-col gap-3">
+            {game.winner === myTeam && view.seat >= 0 && <Confetti />}
             <p className="text-lg font-semibold">
               {winners} win{game.winner === myTeam && view.seat >= 0 ? "!" : "."}
             </p>
@@ -558,29 +582,68 @@ export function Table({
       </section>
 
       <section
+        key={`deal-${game.history.length}-${game.dealer}`}
         aria-label="Your hand"
-        className="hand pt-3"
+        className="hand px-4 pb-2 pt-4"
         style={{ "--n": hand.length } as React.CSSProperties}
       >
-        {sortHand(hand, trump).map((c) => {
+        {sortHand(hand, trump).map((c, i) => {
           const playable = phase === "playing" && myTurn && legal.includes(c) && !namingJoker;
           const discarding = phase === "kitty" && myTurn;
+          // How far this card is from the middle of the hand, for the arc.
+          const off = i - (hand.length - 1) / 2;
+          const half = Math.max((hand.length - 1) / 2, 1);
           return (
-            <PlayingCard
+            <div
               key={c}
-              card={c}
-              dim={phase === "playing" && myTurn && !legal.includes(c)}
-              raised={
-                discarding ? discards.includes(c) : playable ? selected === c : undefined
+              className="deal-in"
+              style={
+                {
+                  "--i": i,
+                  transform: `translateY(${(off / half) ** 2 * 10}px) rotate(${off * Math.min(4, 36 / hand.length)}deg)`,
+                  transformOrigin: "50% 130%",
+                } as React.CSSProperties
               }
-              onClick={playable || discarding ? () => onCard(c) : undefined}
-            />
+            >
+              <PlayingCard
+                card={c}
+                dim={phase === "playing" && myTurn && !legal.includes(c)}
+                raised={
+                  discarding ? discards.includes(c) : playable ? selected === c : undefined
+                }
+                onClick={playable || discarding ? () => onCard(c) : undefined}
+              />
+            </div>
           );
         })}
       </section>
 
       {game.history.length > 0 && <ScoreHistory game={game} myTeam={myTeam} nameOf={nameOf} />}
     </main>
+  );
+}
+
+// ponytail: index-based "random" spread, so it looks the same on every render.
+const CONFETTI = ["#f59e0b", "#ef4444", "#10b981", "#3b82f6", "#a855f7", "#f472b6"];
+function Confetti() {
+  return (
+    <div aria-hidden>
+      {Array.from({ length: 48 }, (_, i) => (
+        <span
+          key={i}
+          className="confetti"
+          style={
+            {
+              left: `${(i * 37) % 100}%`,
+              background: CONFETTI[i % CONFETTI.length],
+              "--fall": `${2.4 + (i % 5) * 0.35}s`,
+              "--wait": `${(i % 12) * 0.12}s`,
+              "--spin": `${(i % 2 ? 1 : -1) * (360 + i * 25)}deg`,
+            } as React.CSSProperties
+          }
+        />
+      ))}
+    </div>
   );
 }
 
