@@ -1,0 +1,451 @@
+// First Mate as an MCP server, for Claude: the Logbook (calendar), Duties
+// (tasks) and the Galley (recipes, and meals planned on the Logbook).
+// Signs in with the person's key from Exercise: Authorization: Bearer fm_…
+// The secret key skips row-level security, so every tool keeps to the key
+// holder's household and checks what the policies would.
+import { NextResponse } from "next/server";
+import { REPEATS, type Repeat, nextDue } from "@/lib/duties";
+import { findRecipes, ingredientLine, type RecipeCard } from "@/lib/galley";
+import { hashKey } from "@/lib/health";
+import { type EventRow, type ExceptionRow, addDays, dayKey, describeRepeat, fromWall, occurrences, startOfDay, wallOf } from "@/lib/logbook";
+import { Problem, type Tool, answer } from "@/lib/mcp";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+type Admin = ReturnType<typeof createAdminClient>;
+type Ctx = { db: Admin; me: string; household: string; owner: boolean };
+
+const INSTRUCTIONS =
+  "First Mate is the family's organiser. Dates are YYYY-MM-DD and times HH:MM, both in Sydney. " +
+  "The Logbook is the calendar; Duties are the to-do list; the Galley is the cookbook. " +
+  "To plan meals, find recipes with list_recipes (get_recipes has ingredients and steps), then put each meal on the Logbook with add_event and its recipe_id.";
+
+// ---------- arguments ----------
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const TIME = /^\d{2}:\d{2}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function str(args: Record<string, unknown>, key: string, max = 2000): string | null {
+  const v = args[key];
+  if (v === undefined || v === null || v === "") return null;
+  if (typeof v !== "string") throw new Problem(`${key} should be text.`);
+  if (v.trim().length > max) throw new Problem(`${key} is too long (${max} characters at most).`);
+  return v.trim() || null;
+}
+const matching = (args: Record<string, unknown>, key: string, re: RegExp, what: string) => {
+  const v = str(args, key);
+  if (v !== null && !re.test(v)) throw new Problem(`${key} should be ${what}.`);
+  return v;
+};
+const day = (args: Record<string, unknown>, key: string) => matching(args, key, DAY, "a date, YYYY-MM-DD");
+const time = (args: Record<string, unknown>, key: string) => matching(args, key, TIME, "a time, HH:MM");
+const id = (args: Record<string, unknown>, key: string) => {
+  const v = matching(args, key, UUID, "an id from a list_ tool");
+  if (!v) throw new Problem(`Say which ${key}.`);
+  return v;
+};
+
+/** Rows from a query, or a thrown error (logged, not shown to the model). */
+function rows<T>({ data, error }: { data: unknown; error: unknown }): T {
+  if (error) throw error;
+  return data as T;
+}
+
+const pad = (n: number) => String(n).padStart(2, "0");
+const hhmm = (d: Date) => {
+  const w = wallOf(d);
+  return `${pad(w.h)}:${pad(w.min)}`;
+};
+const at = (date: string, t: string) => {
+  const [y, m, d] = date.split("-").map(Number);
+  const [h, min] = t.split(":").map(Number);
+  return fromWall({ y, m, d, h, min });
+};
+
+// ---------- the crew, by name ----------
+
+async function crew({ db, household }: Ctx) {
+  const [people, kids] = await Promise.all([
+    db.from("household_members").select("profile_id, profiles(display_name)").eq("household_id", household),
+    db.from("dependents").select("id, display_name").eq("household_id", household),
+  ]);
+  return [
+    ...rows<{ profile_id: string; profiles: { display_name: string } | null }[]>(people).map((p) => ({ key: `p:${p.profile_id}`, name: p.profiles?.display_name ?? "Crew" })),
+    ...rows<{ id: string; display_name: string }[]>(kids).map((k) => ({ key: `d:${k.id}`, name: k.display_name })),
+  ];
+}
+
+/** Crew keys ("p:…"/"d:…") for names, or a Problem listing who there is. */
+function keysFor(names: unknown, everyone: { key: string; name: string }[]): string[] {
+  if (names === undefined || names === null) return [];
+  const list = Array.isArray(names) ? names : [names];
+  return list.map((n) => {
+    const found = everyone.find((c) => c.name.toLowerCase() === String(n).trim().toLowerCase());
+    if (!found) throw new Problem(`No one called ${n}. The crew: ${everyone.map((c) => c.name).join(", ")}.`);
+    return found.key;
+  });
+}
+
+const canDelete = (ctx: Ctx, createdBy: string) => ctx.owner || createdBy === ctx.me;
+
+// ---------- tools ----------
+
+const whoField = { type: "array", items: { type: "string" }, description: "Crew members' names (people or children)." };
+
+const TOOLS: Record<string, Tool<Ctx>> = {
+  list_events: {
+    description: "What's on the Logbook (the family calendar) between two dates, repeats included. Meals show their recipe_id.",
+    input: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "First day, YYYY-MM-DD." },
+        to: { type: "string", description: "Last day, YYYY-MM-DD (inclusive). Defaults to a week after from." },
+      },
+      required: ["from"],
+    },
+    run: async (args, ctx) => {
+      const first = day(args, "from");
+      if (!first) throw new Problem("Say which day to start from.");
+      const last = day(args, "to") ?? addDays(first, 6);
+      if (last < first || last > addDays(first, 366)) throw new Problem("to should be on or after from, and within a year of it.");
+      const from = startOfDay(first);
+      const to = startOfDay(addDays(last, 1));
+      const events = rows<(EventRow & { created_by: string; recipe_id: string | null })[]>(
+        await ctx.db
+          .from("events")
+          .select("id, title, description, location, start_at, end_at, all_day, recurrence_rule, recurrence_ends_at, created_by, recipe_id")
+          .eq("household_id", ctx.household)
+          .lt("start_at", to.toISOString())
+          .or(`recurrence_rule.not.is.null,end_at.gt.${from.toISOString()}`)
+          .or(`recurrence_ends_at.is.null,recurrence_ends_at.gt.${from.toISOString()}`),
+      );
+      if (events.length === 0) return [];
+      const ids = events.map((e) => e.id);
+      const [exceptions, assignees, everyone] = await Promise.all([
+        ctx.db.from("event_exceptions").select("parent_event_id, original_start_at, is_cancelled, title, description, location, start_at, end_at").in("parent_event_id", ids),
+        ctx.db.from("event_assignees").select("event_id, profile_id, dependent_id").in("event_id", ids),
+        crew(ctx),
+      ]);
+      const names = new Map(everyone.map((c) => [c.key, c.name]));
+      const who = new Map<string, string[]>();
+      for (const a of rows<{ event_id: string; profile_id: string | null; dependent_id: string | null }[]>(assignees)) {
+        const name = names.get(a.profile_id ? `p:${a.profile_id}` : `d:${a.dependent_id}`);
+        if (name) who.set(a.event_id, [...(who.get(a.event_id) ?? []), name]);
+      }
+      const byId = new Map(events.map((e) => [e.id, e]));
+      return occurrences(events, rows<ExceptionRow[]>(exceptions), from, to).map((o) => ({
+        event_id: o.eventId,
+        ...(o.rule ? { occurrence: o.originalStart.toISOString(), repeats: describeRepeat(o.rule) } : {}),
+        title: o.title,
+        date: dayKey(o.start),
+        ...(o.allDay
+          ? { all_day: true, end_date: addDays(dayKey(o.end), -1) }
+          : { start_time: hhmm(o.start), end_time: hhmm(o.end) }),
+        location: o.location,
+        description: o.description,
+        who: who.get(o.eventId) ?? [],
+        recipe_id: byId.get(o.eventId)?.recipe_id ?? null,
+      }));
+    },
+  },
+
+  add_event: {
+    description:
+      "Adds an event to the Logbook. Without start_time it's all day. With a recipe_id it's a meal: the title defaults to the recipe's, and the end to how long it takes.",
+    input: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        date: { type: "string", description: "YYYY-MM-DD" },
+        start_time: { type: "string", description: "HH:MM. Leave out for an all-day event." },
+        end_time: { type: "string", description: "HH:MM. Defaults to an hour after start_time (or the recipe's time)." },
+        end_date: { type: "string", description: "Last day of a multi-day, all-day event." },
+        location: { type: "string" },
+        description: { type: "string" },
+        who: whoField,
+        recipe_id: { type: "string", description: "A Galley recipe, to make this a meal." },
+      },
+      required: ["date"],
+    },
+    run: async (args, ctx) => {
+      const date = day(args, "date");
+      if (!date) throw new Problem("Pick a date.");
+      const recipeId = args.recipe_id ? id(args, "recipe_id") : null;
+      let title = str(args, "title", 200);
+      let length = 60;
+      if (recipeId) {
+        const { data: recipe } = await ctx.db.from("recipes").select("title, prep_minutes, cook_minutes").eq("id", recipeId).eq("household_id", ctx.household).maybeSingle();
+        if (!recipe) throw new Problem("No recipe with that id in the Galley.");
+        title ??= recipe.title as string;
+        length = Math.max(30, (recipe.prep_minutes ?? 0) + (recipe.cook_minutes ?? 0) || 60);
+      }
+      if (!title) throw new Problem("Give the event a title.");
+      const startTime = time(args, "start_time");
+      const endTime = time(args, "end_time");
+      let start: Date;
+      let end: Date;
+      if (startTime) {
+        start = at(date, startTime);
+        // Not past midnight unless an end time says so.
+        end = endTime ? at(date, endTime) : new Date(Math.min(start.getTime() + length * 60_000, startOfDay(addDays(date, 1)).getTime()));
+        if (end <= start) throw new Problem("It needs to end after it starts.");
+      } else {
+        const lastDay = day(args, "end_date") ?? date;
+        if (lastDay < date) throw new Problem("end_date can't be before date.");
+        start = startOfDay(date);
+        end = startOfDay(addDays(lastDay, 1));
+      }
+      const who = keysFor(args.who, await crew(ctx));
+      const { data: event, error } = await ctx.db
+        .from("events")
+        .insert({
+          household_id: ctx.household,
+          title,
+          description: str(args, "description"),
+          location: str(args, "location", 200),
+          start_at: start.toISOString(),
+          end_at: end.toISOString(),
+          all_day: !startTime,
+          created_by: ctx.me,
+          recipe_id: recipeId,
+        })
+        .select("id")
+        .single();
+      if (error) throw error;
+      if (who.length) {
+        const { error: whoError } = await ctx.db.from("event_assignees").insert(
+          [...new Set(who)].map((k) => ({ event_id: event.id, profile_id: k.startsWith("p:") ? k.slice(2) : null, dependent_id: k.startsWith("d:") ? k.slice(2) : null })),
+        );
+        if (whoError) {
+          await ctx.db.from("events").delete().eq("id", event.id);
+          throw whoError;
+        }
+      }
+      return { added: event.id, title, date };
+    },
+  },
+
+  delete_event: {
+    description: "Deletes a Logbook event. For a repeating one, give occurrence (from list_events) to cancel just that one; leave it out to delete the whole series.",
+    input: {
+      type: "object",
+      properties: { event_id: { type: "string" }, occurrence: { type: "string", description: "The occurrence value from list_events." } },
+      required: ["event_id"],
+    },
+    run: async (args, ctx) => {
+      const eventId = id(args, "event_id");
+      const { data: event } = await ctx.db.from("events").select("title, created_by, recurrence_rule").eq("id", eventId).eq("household_id", ctx.household).maybeSingle();
+      if (!event) throw new Problem("No event with that id on the Logbook.");
+      if (!canDelete(ctx, event.created_by)) throw new Problem("Only the person who added this (or a Captain) can delete it.");
+      const occurrence = str(args, "occurrence");
+      if (occurrence && event.recurrence_rule) {
+        if (Number.isNaN(Date.parse(occurrence))) throw new Problem("occurrence should be the value list_events gave.");
+        const { error } = await ctx.db
+          .from("event_exceptions")
+          .upsert({ parent_event_id: eventId, original_start_at: new Date(occurrence).toISOString(), is_cancelled: true }, { onConflict: "parent_event_id,original_start_at" });
+        if (error) throw error;
+        return `Cancelled one ${event.title}; the rest still repeat.`;
+      }
+      const { error } = await ctx.db.from("events").delete().eq("id", eventId);
+      if (error) throw error;
+      return `Deleted ${event.title}.`;
+    },
+  },
+
+  list_tasks: {
+    description: "The family's Duties (to-do list): everything still to do, and optionally what was ticked off in the last fortnight.",
+    input: { type: "object", properties: { include_done: { type: "boolean" } } },
+    run: async (args, ctx) => {
+      const columns = "id, title, notes, category, due_on, repeat, important, assigned_profile, assigned_dependent, done_at";
+      const open = ctx.db.from("duties").select(columns).eq("household_id", ctx.household).is("done_at", null).order("due_on", { nullsFirst: false });
+      const since = new Date(Date.now() - 14 * 86_400_000).toISOString();
+      const [todo, done, everyone] = await Promise.all([
+        open,
+        args.include_done ? ctx.db.from("duties").select(columns).eq("household_id", ctx.household).gte("done_at", since).order("done_at", { ascending: false }) : { data: [], error: null },
+        crew(ctx),
+      ]);
+      const names = new Map(everyone.map((c) => [c.key, c.name]));
+      type Row = { id: string; assigned_profile: string | null; assigned_dependent: string | null; [k: string]: unknown };
+      return [...rows<Row[]>(todo), ...rows<Row[]>(done)].map(({ assigned_profile, assigned_dependent, ...d }) => ({
+        ...d,
+        who: assigned_profile ? names.get(`p:${assigned_profile}`) : assigned_dependent ? names.get(`d:${assigned_dependent}`) : null,
+      }));
+    },
+  },
+
+  add_task: {
+    description: "Adds a duty to the family's to-do list.",
+    input: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        notes: { type: "string" },
+        category: { type: "string", description: "A short group name, like Garden or School." },
+        due_on: { type: "string", description: "YYYY-MM-DD" },
+        repeat: { type: "string", enum: Object.keys(REPEATS), description: "Needs due_on. Ticking it off moves it to the next date." },
+        important: { type: "boolean" },
+        who: { type: "string", description: "A crew member's name." },
+      },
+      required: ["title"],
+    },
+    run: async (args, ctx) => {
+      const title = str(args, "title", 200);
+      if (!title) throw new Problem("Say what needs doing.");
+      const due = day(args, "due_on");
+      const repeat = str(args, "repeat");
+      if (repeat && !(repeat in REPEATS)) throw new Problem(`repeat should be one of ${Object.keys(REPEATS).join(", ")}.`);
+      if (repeat && !due) throw new Problem("A repeating duty needs a due_on to start from.");
+      const [who] = keysFor(args.who, await crew(ctx));
+      const { data, error } = await ctx.db
+        .from("duties")
+        .insert({
+          household_id: ctx.household,
+          created_by: ctx.me,
+          title,
+          notes: str(args, "notes"),
+          category: str(args, "category", 40),
+          due_on: due,
+          repeat,
+          important: args.important === true,
+          assigned_profile: who?.startsWith("p:") ? who.slice(2) : null,
+          assigned_dependent: who?.startsWith("d:") ? who.slice(2) : null,
+        })
+        .select("id")
+        .single();
+      if (error) throw error;
+      return { added: data.id, title };
+    },
+  },
+
+  complete_task: {
+    description: "Ticks a duty off (or back on with undo). A repeating one moves to its next date instead.",
+    input: { type: "object", properties: { task_id: { type: "string" }, undo: { type: "boolean" } }, required: ["task_id"] },
+    run: async (args, ctx) => {
+      const taskId = id(args, "task_id");
+      const { data: duty } = await ctx.db.from("duties").select("title, due_on, repeat").eq("id", taskId).eq("household_id", ctx.household).maybeSingle();
+      if (!duty) throw new Problem("No duty with that id.");
+      const change =
+        args.undo === true
+          ? { done_at: null, done_by: null }
+          : duty.repeat && duty.due_on
+            ? { due_on: nextDue(duty.due_on, duty.repeat as Repeat, dayKey(new Date())) }
+            : { done_at: new Date().toISOString(), done_by: ctx.me };
+      const { error } = await ctx.db.from("duties").update(change).eq("id", taskId);
+      if (error) throw error;
+      return args.undo === true ? `${duty.title} is back on the list.` : "due_on" in change ? `Done; ${duty.title} is next due ${change.due_on}.` : `Ticked off ${duty.title}.`;
+    },
+  },
+
+  delete_task: {
+    description: "Deletes a duty for good (to finish one, use complete_task).",
+    input: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"] },
+    run: async (args, ctx) => {
+      const taskId = id(args, "task_id");
+      const { data: duty } = await ctx.db.from("duties").select("title, created_by").eq("id", taskId).eq("household_id", ctx.household).maybeSingle();
+      if (!duty) throw new Problem("No duty with that id.");
+      if (!canDelete(ctx, duty.created_by)) throw new Problem("Only a Captain, or whoever added it, can delete this.");
+      const { error } = await ctx.db.from("duties").delete().eq("id", taskId);
+      if (error) throw error;
+      return `Deleted ${duty.title}.`;
+    },
+  },
+
+  list_recipes: {
+    description: "The Galley's recipes, optionally filtered. search matches titles, descriptions and ingredients (every word must match). Shows when each was last cooked.",
+    input: { type: "object", properties: { search: { type: "string" }, tag: { type: "string" } } },
+    run: async (args, ctx) => {
+      type Row = Omit<RecipeCard, "tags" | "ingredients" | "collections" | "cooked_at" | "photo"> & {
+        recipe_tags: { tag: string }[];
+        recipe_ingredients: { name: string }[];
+        recipe_cooks: { cooked_at: string }[];
+      };
+      const found = rows<Row[]>(
+        await ctx.db
+          .from("recipes")
+          .select("id, title, description, servings, prep_minutes, cook_minutes, created_at, recipe_tags(tag), recipe_ingredients(name), recipe_cooks(cooked_at)")
+          .eq("household_id", ctx.household)
+          .order("cooked_at", { referencedTable: "recipe_cooks", ascending: false })
+          .limit(1, { referencedTable: "recipe_cooks" }),
+      ).map(({ recipe_tags, recipe_ingredients, recipe_cooks, ...r }) => ({
+        ...r,
+        tags: recipe_tags.map((t) => t.tag),
+        ingredients: recipe_ingredients.map((i) => i.name),
+        collections: [],
+        cooked_at: recipe_cooks[0]?.cooked_at ?? null,
+        photo: null,
+      }));
+      const tag = str(args, "tag")?.toLowerCase() ?? null;
+      return findRecipes(found, { q: str(args, "search") ?? "", tag, sort: "az" }).map((r) => ({
+        id: r.id,
+        title: r.title,
+        tags: r.tags,
+        servings: r.servings,
+        minutes: (r.prep_minutes ?? 0) + (r.cook_minutes ?? 0) || null,
+        last_cooked: r.cooked_at ? dayKey(new Date(r.cooked_at)) : null,
+      }));
+    },
+  },
+
+  get_recipes: {
+    description: "Recipes in full: ingredients (for shopping lists) and method.",
+    input: { type: "object", properties: { ids: { type: "array", items: { type: "string" }, maxItems: 30 } }, required: ["ids"] },
+    run: async (args, ctx) => {
+      const ids = Array.isArray(args.ids) ? args.ids.map(String).filter((s) => UUID.test(s)).slice(0, 30) : [];
+      if (!ids.length) throw new Problem("Give recipe ids from list_recipes.");
+      type Row = {
+        id: string; title: string; description: string | null; source_url: string | null; servings: number | null; prep_minutes: number | null; cook_minutes: number | null;
+        recipe_ingredients: { position: number; quantity: number | null; unit: string | null; name: string; notes: string | null }[];
+        recipe_steps: { position: number; instruction: string }[];
+        recipe_tags: { tag: string }[];
+      };
+      const found = rows<Row[]>(
+        await ctx.db
+          .from("recipes")
+          .select("id, title, description, source_url, servings, prep_minutes, cook_minutes, recipe_ingredients(position, quantity, unit, name, notes), recipe_steps(position, instruction), recipe_tags(tag)")
+          .eq("household_id", ctx.household)
+          .in("id", ids),
+      );
+      const byPosition = (a: { position: number }, b: { position: number }) => a.position - b.position;
+      return found.map(({ recipe_ingredients, recipe_steps, recipe_tags, ...r }) => ({
+        ...r,
+        tags: recipe_tags.map((t) => t.tag),
+        ingredients: recipe_ingredients.sort(byPosition).map(ingredientLine),
+        method: recipe_steps.sort(byPosition).map((s) => s.instruction),
+      }));
+    },
+  },
+};
+
+// ---------- the endpoint ----------
+
+const reply = (status: number, body: object) => NextResponse.json(body, { status });
+
+export async function POST(request: Request) {
+  const key = request.headers.get("authorization")?.match(/^Bearer\s+(fm_[\w-]{20,100})\s*$/i)?.[1];
+  if (!key) return reply(401, { error: "Send your key from Exercise as: Authorization: Bearer fm_…" });
+  const db = createAdminClient();
+  const { data: holder } = await db.from("health_keys").select("profile_id, household_id").eq("key_hash", hashKey(key)).maybeSingle();
+  if (!holder) return reply(401, { error: "That key isn't in use. Make a new one in Exercise." });
+  const { data: member } = await db
+    .from("household_members")
+    .select("role")
+    .eq("household_id", holder.household_id)
+    .eq("profile_id", holder.profile_id)
+    .neq("role", "guest")
+    .maybeSingle();
+  if (!member) return reply(403, { error: "You're no longer in the crew." });
+  const ctx: Ctx = { db, me: holder.profile_id, household: holder.household_id, owner: member.role === "owner" };
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return reply(400, { jsonrpc: "2.0", id: null, error: { code: -32700, message: "The body should be JSON." } });
+  }
+  const answers = (await Promise.all([body].flat().map((m) => answer(m as object, TOOLS, ctx, INSTRUCTIONS)))).filter(Boolean);
+  if (answers.length === 0) return new Response(null, { status: 202 });
+  return NextResponse.json(Array.isArray(body) ? answers : answers[0]);
+}
+
+// No server-to-client stream: everything is a reply to a POST.
+export const GET = () => new Response(null, { status: 405, headers: { Allow: "POST" } });
