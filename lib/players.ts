@@ -93,7 +93,7 @@ export async function currentMedicalMember(): Promise<Member> {
 /** A Captain, on their own device: fitness tracking. Officers go to their medical records instead. */
 export async function currentHealthOwner(): Promise<Member> {
   const member = await currentMedicalMember();
-  if (member.role !== "owner") redirect("/constitution/medical");
+  if (member.role !== "owner") redirect("/constitution/exercise");
   return member;
 }
 
