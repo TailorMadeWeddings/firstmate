@@ -49,7 +49,16 @@ export function medicareExpiry(raw: string): string | null {
 
 // ---------- the kinds of record ----------
 
-export type Field = { name: string; label: string; type: "text" | "textarea" | "date" | "datetime" | "minutes"; required?: boolean; placeholder?: string };
+export type Field = { name: string; label: string; type: "text" | "textarea" | "date" | "datetime" | "minutes" | "remind"; required?: boolean; placeholder?: string };
+
+/** When an appointment's reminder lands on Duties: days before (or none). */
+export const REMINDERS: [string, string][] = [
+  ["", "No reminder"],
+  ["0", "On the day"],
+  ["1", "The day before"],
+  ["2", "Two days before"],
+  ["7", "A week before"],
+];
 
 export const KINDS = {
   appointment: {
@@ -59,6 +68,7 @@ export const KINDS = {
     fields: [
       { name: "starts_at", label: "When", type: "datetime", required: true },
       { name: "minutes", label: "How long (minutes)", type: "minutes" },
+      { name: "remind_days", label: "Remind me (on Duties)", type: "remind" },
       { name: "provider", label: "Who with", type: "text", placeholder: "Dr Lee, Northside Family Practice" },
       { name: "reason", label: "What it's for", type: "textarea", placeholder: "Ear infection, follow-up on bloods…" },
       { name: "outcome", label: "What happened (results, what was said)", type: "textarea" },

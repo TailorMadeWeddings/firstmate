@@ -28,9 +28,21 @@ const CARD = "id, profile_id, dependent_id, blood_type, allergies, conditions, m
 export type MedicalFile = { id: string; name: string; size_bytes: number | null; created_at: string; appointment_id: string | null; result_id: string | null; url: string | null };
 export type Row = Record<string, string | number | null> & { id: string };
 
-/** The people records are kept for: the Captains and the children. */
-export async function loadSubjects(householdId: string) {
-  return (await loadCrew(householdId)).filter((c) => c.kind === "dependent" || c.label === "Captain");
+/** Whose records the signed-in person keeps: a Captain, the Captains' and the children's; an Officer, their own. */
+export async function loadSubjects(member: { id: string; role: string; householdId: string }) {
+  const crew = await loadCrew(member.householdId);
+  return member.role === "owner"
+    ? crew.filter((c) => c.kind === "dependent" || c.label === "Captain")
+    : crew.filter((c) => c.kind === "profile" && c.id === member.id);
+}
+
+/** A child's birthday, for the immunisation checklist. */
+export async function loadBirthday(person: PersonKey): Promise<string | null> {
+  const { dependent_id } = personColumns(person);
+  if (!dependent_id) return null;
+  const supabase = await createClient();
+  const { data } = await supabase.from("dependents").select("date_of_birth").eq("id", dependent_id).maybeSingle();
+  return data?.date_of_birth ?? null;
 }
 
 /** A person's eq filter, for whichever of profile_id / dependent_id applies. */

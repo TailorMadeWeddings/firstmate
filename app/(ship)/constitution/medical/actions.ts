@@ -5,8 +5,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { fromWall } from "@/lib/logbook";
+import { VISITS } from "@/lib/immunisation";
 import { type Field, type Kind, KINDS, type PersonKey, isPersonKey, medicareExpiry, medicareProblem, personColumns } from "@/lib/medical";
-import { currentHealthOwner } from "@/lib/players";
+import { currentMedicalMember } from "@/lib/players";
 import { createClient } from "@/lib/supabase/server";
 import { FILE_BUCKET } from "./data";
 
@@ -28,7 +29,7 @@ function failed(error: { code?: string; message?: string }): string {
 
 /** The emergency card: allergies, conditions, medications, Medicare, health fund and GP. */
 export async function saveCard(person: PersonKey, _: Result, form: FormData): Promise<Result> {
-  const member = await currentHealthOwner();
+  const member = await currentMedicalMember();
   if (!isPersonKey(person)) return "Pick who this is for.";
   const number = text(form, "medicare_number").replace(/\s+/g, "");
   const irn = text(form, "medicare_irn");
@@ -76,7 +77,7 @@ const wallTime = (s: string) => {
 };
 
 export async function saveRecord(kind: Kind, recordId: string | null, person: PersonKey, _: Result, form: FormData): Promise<Result> {
-  const member = await currentHealthOwner();
+  const member = await currentMedicalMember();
   if (!isPersonKey(person) || !(kind in KINDS)) return "Pick who this is for.";
   const values: Record<string, string | number | null> = {};
   for (const f of KINDS[kind].fields as readonly Field[]) {
@@ -87,7 +88,16 @@ export async function saveRecord(kind: Kind, recordId: string | null, person: Pe
       const n = raw ? Number(raw) : 30;
       if (!Number.isInteger(n) || n < 5 || n > 720) return "How long is in minutes, between 5 and 720.";
       values[f.name] = n;
+    } else if (f.type === "remind") {
+      const n = raw === "" ? null : Number(raw);
+      if (n !== null && (!Number.isInteger(n) || n < 0 || n > 14)) return "Pick when to be reminded.";
+      values[f.name] = n;
     } else values[f.name] = raw || null;
+  }
+  // A vaccination recorded from the childhood schedule remembers which visit it was.
+  if (kind === "vaccination") {
+    const visit = text(form, "schedule_key");
+    values.schedule_key = VISITS.some((v) => v.key === visit) ? visit : null;
   }
   const supabase = await createClient();
   const who = personColumns(person);
@@ -107,9 +117,12 @@ export async function saveRecord(kind: Kind, recordId: string | null, person: Pe
       p_reason: values.reason,
       p_outcome: values.outcome,
       p_follow_up: values.follow_up,
+      p_remind: values.remind_days,
     });
     if (error) return error.code === "P0030" ? "That appointment has gone." : failed(error);
     revalidatePath("/logbook", "layout");
+    revalidatePath("/duties", "layout");
+    revalidatePath("/");
   } else {
     const row = { ...values, ...who, household_id: member.householdId };
     const { error } = recordId
@@ -123,7 +136,7 @@ export async function saveRecord(kind: Kind, recordId: string | null, person: Pe
 }
 
 export async function deleteRecord(kind: Kind, recordId: string, person: PersonKey): Promise<Result> {
-  await currentHealthOwner();
+  await currentMedicalMember();
   const supabase = await createClient();
   const { error } = await supabase.from(KINDS[kind].table).delete().eq("id", recordId).select("id").single();
   if (error) return "Couldn't delete it. Try again.";
@@ -138,7 +151,7 @@ export async function addFile(
   person: PersonKey,
   file: { path: string; name: string; size: number; appointmentId: string | null; resultId: string | null },
 ): Promise<Result> {
-  const member = await currentHealthOwner();
+  const member = await currentMedicalMember();
   if (!isPersonKey(person) || !file.path.startsWith(`${member.householdId}/`)) return "That upload went somewhere unexpected.";
   const supabase = await createClient();
   const { error } = await supabase.from("medical_files").insert({
@@ -157,11 +170,14 @@ export async function addFile(
 }
 
 export async function deleteFile(fileId: string): Promise<Result> {
-  await currentHealthOwner();
+  await currentMedicalMember();
   const supabase = await createClient();
-  const { data, error } = await supabase.from("medical_files").delete().eq("id", fileId).select("path").single();
+  const { data: file } = await supabase.from("medical_files").select("path").eq("id", fileId).maybeSingle();
+  if (!file) return "Couldn't delete it. Try again.";
+  // Storage only lets you remove a file whose record you can see, so the file goes first.
+  await supabase.storage.from(FILE_BUCKET).remove([file.path]);
+  const { error } = await supabase.from("medical_files").delete().eq("id", fileId).select("id").single();
   if (error) return "Couldn't delete it. Try again.";
-  await supabase.storage.from(FILE_BUCKET).remove([data.path]);
   done();
   return null;
 }

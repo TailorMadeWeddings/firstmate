@@ -100,15 +100,69 @@ test("medical: an appointment shows on the Logbook as just 'Appointment', and go
   assert.equal(got.after, 0);
 });
 
-test("medical: documents in storage are for Captains only", async () => {
+test("medical: an Officer keeps their own records, private to them", async () => {
+  const db = await family();
+  await as(db, TRUSTED, async (tx) => {
+    await tx.query(`insert into medical_profiles (household_id, profile_id, allergies) values ('${HOME}', '${TRUSTED}', 'Bee stings')`);
+    await tx.query(`insert into medical_results (household_id, profile_id, taken_on, test) values ('${HOME}', '${TRUSTED}', '2026-10-01', 'Cholesterol')`);
+  });
+  await db.exec(`
+    insert into medical_profiles (household_id, profile_id, allergies) values ('${HOME}', '${TRUSTED}', 'Bee stings');
+    insert into medical_results (household_id, profile_id, taken_on, test, created_by) values ('${HOME}', '${TRUSTED}', '2026-10-01', 'Cholesterol', '${TRUSTED}');
+  `);
+  const officer = await seen(db, TRUSTED);
+  assert.deepEqual(officer.cards, [TRUSTED, KID].sort()); // their own, and the children's to read
+  assert.equal(officer.medical_results, 1); // only their own
+  const captain = await seen(db, OWNER);
+  assert.ok(!captain.cards.includes(TRUSTED), "Captains don't see an Officer's card");
+  assert.equal(captain.medical_results, 3);
+  // And an Officer can't write anyone else's.
+  await assert.rejects(
+    as(db, TRUSTED, (tx) => tx.query(`insert into medical_results (household_id, profile_id, taken_on, test) values ('${HOME}', '${OWNER}', '2026-10-02', 'X')`)),
+    /row-level security/,
+  );
+});
+
+test("medical: a reminder for an appointment goes on Duties, says who and when only, and follows it", async () => {
+  const db = await family();
+  const save = (tx: Transaction, id: string | null, starts: string, remind: number | null) =>
+    tx
+      .query<{ id: string }>(`select medical_save_appointment($1, $2, null, $3, $4, 30, 'Dr Lee', 'Ear infection', null, null, $5) as id`, [id, HOME, KID, starts, remind])
+      .then((r) => r.rows[0].id);
+  const duties = (tx: Transaction) =>
+    tx.query<{ title: string; due: string; important: boolean }>(`select title, due_on::text as due, important from duties`).then((r) => r.rows);
+  const got = await as(db, OWNER, async (tx) => {
+    const id = await save(tx, null, "2030-11-03T22:00:00Z", 1); // Mon 4 Nov, 9am in Sydney
+    const first = await duties(tx);
+    await save(tx, id, "2030-11-10T23:30:00Z", 2); // Mon 11 Nov, 10:30am
+    const moved = await duties(tx);
+    await save(tx, id, "2030-11-10T23:30:00Z", null);
+    const off = await duties(tx);
+    await save(tx, id, "2030-11-10T23:30:00Z", 0);
+    await tx.query(`delete from medical_appointments where id = $1`, [id]);
+    return { first, moved, off, gone: await duties(tx) };
+  });
+  assert.deepEqual(got.first, [{ title: "Appointment for Teddy, Mon 4 Nov, 9:00am", due: "2030-11-03", important: true }]);
+  assert.deepEqual(got.moved, [{ title: "Appointment for Teddy, Mon 11 Nov, 10:30am", due: "2030-11-09", important: true }]);
+  assert.deepEqual(got.off, []);
+  assert.deepEqual(got.gone, []);
+});
+
+test("medical: documents follow their record; the crew can upload to their own household only", async () => {
   const db = await family();
   const upload = (who: string, folder: string) =>
     as(db, who, (tx) => tx.query(`insert into storage.objects (bucket_id, name) values ('medical-files', $1)`, [`${folder}/letter.pdf`]));
   await upload(OWNER, HOME);
-  await upload(PARTNER, HOME);
-  await assert.rejects(upload(TRUSTED, HOME), /row-level security/);
+  await upload(TRUSTED, HOME);
+  await assert.rejects(upload(GUEST, HOME), /row-level security/);
   await assert.rejects(upload(OTHER_OWNER, HOME), /row-level security/);
-  await db.exec(`insert into storage.objects (bucket_id, name) values ('medical-files', '${HOME}/x.pdf')`);
-  assert.equal(await as(db, PARTNER, (tx) => count(tx, "storage.objects")), 1);
-  assert.equal(await as(db, TRUSTED, (tx) => count(tx, "storage.objects")), 0);
+  // The family's three files, plus an Officer's own.
+  await db.exec(`
+    insert into medical_files (household_id, profile_id, path, name, created_by) values ('${HOME}', '${TRUSTED}', '${HOME}/officer.pdf', 'Mine.pdf', '${TRUSTED}');
+    insert into storage.objects (bucket_id, name) select 'medical-files', path from medical_files;
+  `);
+  const files = (who: string) => as(db, who, (tx) => tx.query<{ name: string }>(`select name from storage.objects order by name`).then((r) => r.rows.length));
+  assert.equal(await files(PARTNER), 3);
+  assert.equal(await files(TRUSTED), 1);
+  assert.equal(await files(OTHER_OWNER), 0);
 });

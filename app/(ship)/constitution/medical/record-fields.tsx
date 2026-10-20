@@ -1,6 +1,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { type Field, type Kind, KINDS } from "@/lib/medical";
+import { NativeSelect } from "@/components/ui/native-select";
+import { type Field, type Kind, KINDS, REMINDERS } from "@/lib/medical";
 
 const area =
   "w-full rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:text-sm";
@@ -12,7 +13,15 @@ export function RecordFields({ kind, values }: { kind: Kind; values: Record<stri
       {(KINDS[kind].fields as readonly Field[]).map((f) => (
         <div key={f.name} className={`grid gap-1 ${f.type === "textarea" ? "sm:col-span-2" : ""}`}>
           <Label htmlFor={f.name}>{f.label}</Label>
-          {f.type === "textarea" ? (
+          {f.type === "remind" ? (
+            <NativeSelect id={f.name} name={f.name} defaultValue={values[f.name] ?? "1"} className="h-11 text-base">
+              {REMINDERS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </NativeSelect>
+          ) : f.type === "textarea" ? (
             <textarea id={f.name} name={f.name} rows={3} defaultValue={values[f.name] ?? ""} placeholder={f.placeholder} className={area} />
           ) : (
             <Input

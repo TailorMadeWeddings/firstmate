@@ -6,7 +6,7 @@ import { ActionForm } from "@/components/action-form";
 import { Button } from "@/components/ui/button";
 import { wallOf } from "@/lib/logbook";
 import { KINDS, isKind, personKey } from "@/lib/medical";
-import { currentHealthOwner } from "@/lib/players";
+import { currentMedicalMember } from "@/lib/players";
 import { deleteRecord, saveRecord } from "../../actions";
 import { loadRecord, loadSubjects } from "../../data";
 import { RecordFields } from "../../record-fields";
@@ -33,13 +33,13 @@ const local = (iso: string) => {
 };
 
 async function EditRecord({ params }: Props) {
-  const member = await currentHealthOwner();
+  const member = await currentMedicalMember();
   const { kind, id } = await params;
   if (!isKind(kind)) notFound();
   const record = await loadRecord(kind, id);
   if (!record) notFound();
   const person = personKey(record);
-  const subject = (await loadSubjects(member.householdId)).find((s) => s.key === person);
+  const subject = (await loadSubjects(member)).find((s) => s.key === person);
   const values = Object.fromEntries(
     Object.entries(record).map(([k, v]) => [k, v === null ? "" : k === "starts_at" ? local(String(v)) : String(v)]),
   );

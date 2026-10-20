@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatMedicare, isPersonKey } from "@/lib/medical";
-import { currentHealthOwner } from "@/lib/players";
+import { currentMedicalMember } from "@/lib/players";
 import { saveCard } from "../actions";
 import { loadCard, loadCards, loadSubjects } from "../data";
 
@@ -29,13 +29,13 @@ export default function CardPage(props: Props) {
 }
 
 async function EditCard({ searchParams }: Props) {
-  const member = await currentHealthOwner();
+  const member = await currentMedicalMember();
   const { person } = await searchParams;
-  const subject = (await loadSubjects(member.householdId)).find((s) => s.key === person);
+  const subject = (await loadSubjects(member)).find((s) => s.key === person);
   if (!isPersonKey(person) || !subject) notFound();
   const [card, cards] = await Promise.all([loadCard(person), loadCards()]);
   // A family shares one Medicare card; offer the number already on someone else's.
-  const familyNumber = [...cards.values()].find((c) => c.medicare_number)?.medicare_number;
+  const familyNumber = member.role === "owner" ? [...cards.values()].find((c) => c.medicare_number)?.medicare_number : undefined;
   const field = (name: string, label: string, value: string | null | undefined, props: React.ComponentProps<typeof Input> = {}) => (
     <div className="grid gap-1">
       <Label htmlFor={name}>{label}</Label>

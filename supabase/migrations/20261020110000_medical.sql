@@ -1,15 +1,30 @@
 -- Migration: medical records
 -- Appointments, test results, vaccinations, documents and an emergency card
 -- (allergies, conditions, Medicare, GP) for each Captain and each child.
--- Captains see and keep everyone's. Officers see only the children's
--- emergency cards, read-only. Guests and everyone else see nothing.
--- Appointments also put an "Appointment" on the Logbook, with no details.
+-- Captains see and keep the Captains' and the children's. Officers keep
+-- their own, private to them, and can read the children's emergency cards.
+-- Guests and everyone else see nothing.
+-- Appointments put an "Appointment" on the Logbook, with no details, and
+-- can leave a reminder on Duties.
 
 /** A record is about exactly one person (a member or a child) in its household. */
 create function public.medical_person_ok(p_household uuid, p_profile uuid, p_dependent uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
   select (p_profile is null) <> (p_dependent is null)
      and public.duty_assignee_ok(p_household, p_profile, p_dependent);
+$$;
+
+/**
+ * Whether the caller may see and keep records about this person: a Captain,
+ * for the Captains and the children; anyone in the crew, for themselves.
+ */
+create function public.medical_can_keep(p_household uuid, p_profile uuid, p_dependent uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select (public.is_owner_of(p_household) and (
+            p_dependent is not null
+            or exists (select 1 from public.household_members m
+                       where m.household_id = p_household and m.profile_id = p_profile and m.role = 'owner')))
+      or (p_profile = auth.uid() and public.is_crew_of(p_household));
 $$;
 
 -- The emergency card: one per person.
@@ -51,8 +66,10 @@ create table public.medical_appointments (
   reason        text,
   outcome       text,
   follow_up     text,
-  -- Its "Appointment" on the Logbook.
+  -- Its "Appointment" on the Logbook, and its reminder on Duties.
   event_id      uuid references public.events(id) on delete set null,
+  remind_days   smallint check (remind_days between 0 and 14),
+  duty_id       uuid references public.duties(id) on delete set null,
   created_by    uuid not null default auth.uid() references public.profiles(id),
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
@@ -87,6 +104,8 @@ create table public.medical_vaccinations (
   dependent_id  uuid references public.dependents(id) on delete cascade,
   given_on      date not null,
   vaccine       text not null check (trim(vaccine) <> '' and length(vaccine) <= 160),
+  -- Which visit on the childhood schedule this was ("2m", "12m", "year7"…), if any.
+  schedule_key  text check (length(schedule_key) <= 20),
   dose          text check (length(dose) <= 60),
   provider      text check (length(provider) <= 160),
   batch         text check (length(batch) <= 60),
@@ -124,38 +143,40 @@ alter table public.medical_results      enable row level security;
 alter table public.medical_vaccinations enable row level security;
 alter table public.medical_files        enable row level security;
 
--- Emergency cards: Captains see all; Officers see the children's.
-create policy "Captains see every card; Officers see the children's"
+-- Emergency cards: as below, plus the crew can read the children's.
+create policy "Cards: your own, the family's for Captains, the children's for the crew"
   on public.medical_profiles for select to authenticated
-  using (public.is_owner_of(household_id) or (dependent_id is not null and public.is_crew_of(household_id)));
-create policy "Captains keep the cards"
+  using (public.medical_can_keep(household_id, profile_id, dependent_id) or (dependent_id is not null and public.is_crew_of(household_id)));
+create policy "Cards: kept by whoever may keep them"
   on public.medical_profiles for insert to authenticated
-  with check (public.is_owner_of(household_id) and public.medical_person_ok(household_id, profile_id, dependent_id));
-create policy "Captains change the cards"
+  with check (public.medical_can_keep(household_id, profile_id, dependent_id) and public.medical_person_ok(household_id, profile_id, dependent_id));
+create policy "Cards: changed by whoever may keep them"
   on public.medical_profiles for update to authenticated
-  using (public.is_owner_of(household_id))
-  with check (public.is_owner_of(household_id) and public.medical_person_ok(household_id, profile_id, dependent_id));
-create policy "Captains delete the cards"
+  using (public.medical_can_keep(household_id, profile_id, dependent_id))
+  with check (public.medical_can_keep(household_id, profile_id, dependent_id) and public.medical_person_ok(household_id, profile_id, dependent_id));
+create policy "Cards: deleted by whoever may keep them"
   on public.medical_profiles for delete to authenticated
-  using (public.is_owner_of(household_id));
+  using (public.medical_can_keep(household_id, profile_id, dependent_id));
 
--- Everything else: Captains only.
-create policy "Captains keep appointments" on public.medical_appointments for all to authenticated
-  using (public.is_owner_of(household_id))
-  with check (public.is_owner_of(household_id) and public.medical_person_ok(household_id, profile_id, dependent_id));
-create policy "Captains keep results" on public.medical_results for all to authenticated
-  using (public.is_owner_of(household_id))
-  with check (public.is_owner_of(household_id) and public.medical_person_ok(household_id, profile_id, dependent_id));
-create policy "Captains keep vaccinations" on public.medical_vaccinations for all to authenticated
-  using (public.is_owner_of(household_id))
-  with check (public.is_owner_of(household_id) and public.medical_person_ok(household_id, profile_id, dependent_id));
-create policy "Captains keep documents" on public.medical_files for all to authenticated
-  using (public.is_owner_of(household_id))
-  with check (public.is_owner_of(household_id) and public.medical_person_ok(household_id, profile_id, dependent_id));
+-- Everything else: only whoever may keep that person's records.
+create policy "Appointments: whoever may keep them" on public.medical_appointments for all to authenticated
+  using (public.medical_can_keep(household_id, profile_id, dependent_id))
+  with check (public.medical_can_keep(household_id, profile_id, dependent_id) and public.medical_person_ok(household_id, profile_id, dependent_id));
+create policy "Results: whoever may keep them" on public.medical_results for all to authenticated
+  using (public.medical_can_keep(household_id, profile_id, dependent_id))
+  with check (public.medical_can_keep(household_id, profile_id, dependent_id) and public.medical_person_ok(household_id, profile_id, dependent_id));
+create policy "Vaccinations: whoever may keep them" on public.medical_vaccinations for all to authenticated
+  using (public.medical_can_keep(household_id, profile_id, dependent_id))
+  with check (public.medical_can_keep(household_id, profile_id, dependent_id) and public.medical_person_ok(household_id, profile_id, dependent_id));
+create policy "Documents: whoever may keep them" on public.medical_files for all to authenticated
+  using (public.medical_can_keep(household_id, profile_id, dependent_id))
+  with check (public.medical_can_keep(household_id, profile_id, dependent_id) and public.medical_person_ok(household_id, profile_id, dependent_id));
 
 -- ============================================================
 -- Saving an appointment keeps its Logbook event in step: titled just
--- "Appointment", for the person it's about, with no other details.
+-- "Appointment", for the person it's about, with no other details. With
+-- p_remind (days before), it also keeps a reminder on Duties for whoever
+-- saved it: who and when, never what for.
 -- security invoker: the caller's row-level security applies (Captains
 -- have full access to events).
 -- ============================================================
@@ -169,7 +190,8 @@ create function public.medical_save_appointment(
   p_provider text,
   p_reason text,
   p_outcome text,
-  p_follow_up text
+  p_follow_up text,
+  p_remind integer default null
 ) returns uuid
 language plpgsql
 security invoker
@@ -178,6 +200,9 @@ as $$
 declare
   saved uuid;
   linked uuid;
+  reminder uuid;
+  who text;
+  due date := (p_starts at time zone 'Australia/Sydney')::date - coalesce(p_remind, 0);
 begin
   if p_appointment is null then
     insert into public.medical_appointments (household_id, profile_id, dependent_id, starts_at, minutes, provider, reason, outcome, follow_up)
@@ -188,7 +213,7 @@ begin
        set profile_id = p_profile, dependent_id = p_dependent, starts_at = p_starts, minutes = p_minutes,
            provider = p_provider, reason = p_reason, outcome = p_outcome, follow_up = p_follow_up
      where id = p_appointment
-    returning id, event_id into saved, linked;
+    returning id, event_id, duty_id into saved, linked, reminder;
     if saved is null then
       raise exception 'appointment not found' using errcode = 'P0030';
     end if;
@@ -205,16 +230,44 @@ begin
   end if;
   insert into public.event_assignees (event_id, profile_id, dependent_id) values (linked, p_profile, p_dependent);
 
+  update public.medical_appointments set remind_days = p_remind where id = saved;
+  if p_remind is null or p_starts <= now() then
+    -- No reminder wanted (or it's already happened): drop any old one.
+    if reminder is not null then
+      update public.medical_appointments set duty_id = null where id = saved;
+      delete from public.duties where id = reminder;
+    end if;
+  else
+    select coalesce((select display_name from public.profiles where id = p_profile),
+                    (select display_name from public.dependents where id = p_dependent))
+      into who;
+    if reminder is null then
+      insert into public.duties (household_id, title, due_on, important, assigned_profile, created_by)
+      values (p_household, 'x', due, true, auth.uid(), auth.uid())
+      returning id into reminder;
+      update public.medical_appointments set duty_id = reminder where id = saved;
+    end if;
+    update public.duties
+       set title = 'Appointment for ' || who || ', '
+                   || trim(to_char(p_starts at time zone 'Australia/Sydney', 'Dy FMDD Mon, FMHH12:MI'))
+                   || lower(to_char(p_starts at time zone 'Australia/Sydney', 'am')),
+           due_on = due, done_at = null, done_by = null
+     where id = reminder;
+  end if;
+
   return saved;
 end;
 $$;
 
--- Deleting an appointment takes its Logbook event with it.
+-- Deleting an appointment takes its Logbook event and its reminder with it.
 create function public.medical_appointment_gone()
 returns trigger language plpgsql security invoker set search_path = '' as $$
 begin
   if old.event_id is not null then
     delete from public.events where id = old.event_id;
+  end if;
+  if old.duty_id is not null then
+    delete from public.duties where id = old.duty_id;
   end if;
   return old;
 end;
@@ -224,24 +277,23 @@ create trigger medical_appointment_gone
   for each row execute function public.medical_appointment_gone();
 
 -- ============================================================
--- Documents live in a private bucket under <household id>/; Captains only.
+-- Documents live in a private bucket under <household id>/. Reading and
+-- removing one follows its record: the policy looks it up in medical_files
+-- with the caller's own row-level security, so an Officer's documents stay
+-- theirs. Anyone in the crew may upload into their household's folder.
 -- (objects.name, not name: households has a name column of its own.)
 -- ============================================================
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('medical-files', 'medical-files', false, 20971520, '{application/pdf,image/jpeg,image/png,image/webp,image/heic}');
 
-create policy "Medical files: Captains read"
+create policy "Medical files: readable with their record"
   on storage.objects for select to authenticated
-  using (bucket_id = 'medical-files' and exists (
-    select 1 from public.households h where h.id::text = (storage.foldername(objects.name))[1] and public.is_owner_of(h.id)
-  ));
-create policy "Medical files: Captains add"
+  using (bucket_id = 'medical-files' and exists (select 1 from public.medical_files f where f.path = objects.name));
+create policy "Medical files: the crew upload to their household"
   on storage.objects for insert to authenticated
   with check (bucket_id = 'medical-files' and exists (
-    select 1 from public.households h where h.id::text = (storage.foldername(objects.name))[1] and public.is_owner_of(h.id)
+    select 1 from public.households h where h.id::text = (storage.foldername(objects.name))[1] and public.is_crew_of(h.id)
   ));
-create policy "Medical files: Captains remove"
+create policy "Medical files: removed with their record"
   on storage.objects for delete to authenticated
-  using (bucket_id = 'medical-files' and exists (
-    select 1 from public.households h where h.id::text = (storage.foldername(objects.name))[1] and public.is_owner_of(h.id)
-  ));
+  using (bucket_id = 'medical-files' and exists (select 1 from public.medical_files f where f.path = objects.name));
