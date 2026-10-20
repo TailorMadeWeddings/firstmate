@@ -128,3 +128,56 @@ test("exercise: program logs and daily ticks are your own, one tick per item per
   });
   assert.deepEqual(got, { logs: 2, ticks: 1, twice: "refused", badShape: "refused" });
 });
+
+test("exercise: routines are your own; saving replaces the exercises; links are web links only", async () => {
+  const db = await family();
+  const save = (tx: Transaction, routine: string | null, profile: string, exercises: object[], link: string | null = null) =>
+    tx
+      .query<{ id: string }>(`select exercise_save_routine($1, $2, $3, 'Golf Strength', 'Golf', null, 'Cat-cow x10', null, $4, 45, '{MO,WE,FR}', $5) as id`, [
+        routine, HOME, profile, link, JSON.stringify(exercises),
+      ])
+      .then((r) => r.rows[0].id);
+  const refused = async (tx: Transaction, fn: () => Promise<unknown>) => {
+    await tx.query("savepoint s");
+    try {
+      await fn();
+      return "allowed";
+    } catch {
+      return "refused";
+    } finally {
+      await tx.query("rollback to savepoint s");
+    }
+  };
+  const got = await as(db, OWNER, async (tx: Transaction) => {
+    const id = await save(tx, null, OWNER, [
+      { name: "Plate rotations", sets: 3, reps: 12, rep_unit: "reps", load: "5-10 kg plate" },
+      { name: "Plank press", sets: 3, reps: 8, rep_unit: "per_side", load: "5-8 kg DB", cue: "Feet wide" },
+    ], "https://youtu.be/abc");
+    await save(tx, id, OWNER, [{ name: "Plank press", sets: 3, reps: 10, rep_unit: "per_side", load: "8 kg DB" }], "https://youtu.be/abc");
+    const exercises = (await tx.query(`select position, name, reps, load from routine_exercises order by position`)).rows;
+    await tx.query(`insert into routine_logs (routine_id, household_id, done_on, done) values ($1, $2, '2026-10-21', '[{"name":"Plank press","reps":[10,10,9]}]')`, [id, HOME]);
+    return {
+      exercises,
+      logs: await count(tx, "routine_logs"),
+      forSomeoneElse: await refused(tx, () => save(tx, null, PARTNER, [])),
+      script: await refused(tx, () => save(tx, null, OWNER, [], "javascript:alert(1)")),
+      badUnit: await refused(tx, () => save(tx, id, OWNER, [{ name: "Chop", sets: 3, reps: 12, rep_unit: "total" }])),
+    };
+  });
+  assert.deepEqual(got, {
+    exercises: [{ position: 1, name: "Plank press", reps: 10, load: "8 kg DB" }],
+    logs: 1,
+    forSomeoneElse: "refused",
+    script: "refused",
+    badUnit: "refused",
+  });
+
+  // Someone else's routine is invisible, and can't be changed by naming it.
+  await db.exec(`insert into routines (id, household_id, profile_id, name) values ('b0000000-0000-0000-0000-000000000001', '${HOME}', '${OWNER}', 'Legs')`);
+  for (const who of [PARTNER, TRUSTED, GUEST, OUTSIDER, OTHER_OWNER, null]) assert.equal(await as(db, who, (tx) => count(tx, "routines")), 0, `seen by ${who}`);
+  await assert.rejects(as(db, PARTNER, (tx) => save(tx, "b0000000-0000-0000-0000-000000000001", PARTNER, [])), /routine not found/);
+  await assert.rejects(
+    as(db, PARTNER, (tx) => tx.query(`insert into routine_exercises (routine_id, position, name, sets, reps) values ('b0000000-0000-0000-0000-000000000001', 1, 'Squat', 3, 5)`)),
+    /row-level security/,
+  );
+});

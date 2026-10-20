@@ -1,4 +1,4 @@
-import { ChefHat, ClipboardCheck, Dumbbell } from "lucide-react";
+import { ChefHat, ClipboardCheck, ClipboardList, Dumbbell } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { canSeeConstitution, canSeeLedger, currentMember } from "@/lib/players";
 import { sectionIcons, visibleSections } from "@/lib/sections";
 import { createClient } from "@/lib/supabase/server";
 import { tickDaily, tickSlot } from "./constitution/exercise/actions";
-import { loadActivities, loadDaily, loadPrograms } from "./constitution/exercise/data";
+import { loadActivities, loadDaily, loadPrograms, loadRoutines } from "./constitution/exercise/data";
 import { Tick } from "./constitution/exercise/tick";
 import { loadDuties } from "./duties/data";
 import { DutyRow } from "./duties/duty-row";
@@ -150,18 +150,19 @@ async function DueToday() {
 }
 
 /**
- * Your own training for today: scheduled sessions, a program workout if it's
- * a training day, and the daily checklist. Private, so never on the kitchen
+ * Your own training for today: scheduled sessions, a program workout or a
+ * routine if it's one of their days, and the daily checklist. Private, so never on the kitchen
  * screen (canSeeConstitution says no there).
  */
 async function TrainingToday() {
   const member = await currentMember();
   if (!(await canSeeConstitution(member))) return null;
   const today = dayKey(new Date());
-  const [{ slots }, programs, daily] = await Promise.all([loadActivities(`p:${member.id}`, today), loadPrograms(), loadDaily(today)]);
+  const [{ slots }, programs, routines, daily] = await Promise.all([loadActivities(`p:${member.id}`, today), loadPrograms(), loadRoutines(), loadDaily(today)]);
   const todays = slots.filter((s) => dayKey(s.start) === today);
   const due = programs.filter((p) => p.active && isTrainingDay(p.weekdays, today) && !p.logs.some((l) => l.done_on === today));
-  if (todays.length + due.length + daily.length === 0) return null;
+  const routinesDue = routines.filter((r) => isTrainingDay(r.weekdays, today) && r.logs[0]?.done_on !== today);
+  if (todays.length + due.length + routinesDue.length + daily.length === 0) return null;
   const time = (d: Date) => new Intl.DateTimeFormat("en-AU", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(d).replace(" ", "").toLowerCase();
   return (
     <section aria-labelledby="training" className="flex flex-col gap-2 rounded-2xl border bg-card p-6 shadow-sm">
@@ -191,6 +192,14 @@ async function TrainingToday() {
             <Dumbbell className="size-5 shrink-0 text-muted-foreground" aria-hidden />
             <Link href={`/constitution/exercise/program/${p.id}`} className="flex-1 font-medium hover:underline">
               {p.name}: {programState(p.logs, p.goal, p.unit).next.kind === "test" ? "test day" : "workout"}
+            </Link>
+          </li>
+        ))}
+        {routinesDue.map((r) => (
+          <li key={r.id} className="flex items-center gap-3 py-2">
+            <ClipboardList className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+            <Link href={`/constitution/exercise/routine/${r.id}`} className="flex-1 font-medium hover:underline">
+              {r.name}
             </Link>
           </li>
         ))}

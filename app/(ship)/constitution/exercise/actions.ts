@@ -240,6 +240,51 @@ export async function undoProgramLog(logId: string): Promise<Result> {
   return null;
 }
 
+// ---------- routines (Claude writes them; here they're logged and deleted) ----------
+
+/** A routine done today: each exercise's reps per set and load, as actually done. */
+export async function logRoutine(routineId: string, _: Result, form: FormData): Promise<Result> {
+  const member = await currentMedicalMember();
+  const supabase = await createClient();
+  const { data: exercises, error: readError } = await supabase.from("routine_exercises").select("position, name, rep_unit").eq("routine_id", routineId).order("position");
+  if (readError) return failed(readError);
+  const did = [];
+  for (const e of exercises) {
+    const reps = form.getAll(`reps_${e.position}`).map((v) => Number(v));
+    if (reps.some((n) => !Number.isInteger(n) || n < 0 || n > 10000)) return `${e.name}: each set is a whole number.`;
+    const load = text(form, `load_${e.position}`);
+    if (load.length > 60) return `${e.name}: keep the load short.`;
+    did.push({ name: e.name, rep_unit: e.rep_unit, reps, load: load || null });
+  }
+  const notes = text(form, "notes");
+  if (notes.length > 2000) return "Notes are too long.";
+  const { error } = await supabase
+    .from("routine_logs")
+    .insert({ routine_id: routineId, household_id: member.householdId, profile_id: member.id, done_on: dayKey(new Date()), notes: notes || null, done: did });
+  if (error) return failed(error);
+  done();
+  return null;
+}
+
+export async function undoRoutineLog(logId: string): Promise<Result> {
+  await currentMedicalMember();
+  const supabase = await createClient();
+  const { error } = await supabase.from("routine_logs").delete().eq("id", logId).select("id").single();
+  if (error) return failed(error);
+  done();
+  return null;
+}
+
+export async function deleteRoutine(routineId: string): Promise<Result> {
+  await currentMedicalMember();
+  const supabase = await createClient();
+  const { error } = await supabase.from("routines").delete().eq("id", routineId).select("id").single();
+  if (error) return failed(error);
+  done();
+  home();
+  return null;
+}
+
 // ---------- the daily checklist ----------
 
 export async function addDailyItem(_: Result, form: FormData): Promise<Result> {

@@ -1,7 +1,7 @@
 // Loading exercise records. Reads go through the signed-in user's client, so
 // row-level security returns only what they keep: their own, and the
 // children's if they're a Captain.
-import type { ProgramLog, Unit } from "@/lib/exercise";
+import type { ProgramLog, RepUnit, RoutineExercise, Unit } from "@/lib/exercise";
 import type { HealthDay } from "@/lib/health";
 import { type EventRow, type Occurrence, addDays, dayKey, occurrences, startOfDay } from "@/lib/logbook";
 import { type PersonKey, personColumns } from "@/lib/medical";
@@ -87,6 +87,30 @@ export async function loadPrograms(): Promise<Program[]> {
       .order("created_at"),
   );
   return rows.map(({ program_logs, ...p }) => ({ ...p, logs: program_logs }));
+}
+
+export type RoutineLog = { id: string; done_on: string; notes: string | null; done: { name: string; rep_unit: RepUnit; reps: number[]; load: string | null }[] };
+export type Routine = {
+  id: string; name: string; category: string | null; description: string | null; warm_up: string | null; progression: string | null;
+  link: string | null; rest_seconds: number | null; weekdays: string[];
+  exercises: (RoutineExercise & { position: number })[];
+  /** Newest first, the last 20. */
+  logs: RoutineLog[];
+};
+
+/** Your routines, with exercises in order and recent logs. */
+export async function loadRoutines(): Promise<Routine[]> {
+  const supabase = await createClient();
+  const rows = must<(Omit<Routine, "exercises" | "logs"> & { routine_exercises: Routine["exercises"]; routine_logs: RoutineLog[] })[]>(
+    await supabase
+      .from("routines")
+      .select("id, name, category, description, warm_up, progression, link, rest_seconds, weekdays, routine_exercises(position, name, sets, reps, rep_unit, load, cue), routine_logs(id, done_on, notes, done)")
+      .order("name")
+      .order("done_on", { referencedTable: "routine_logs", ascending: false })
+      .order("created_at", { referencedTable: "routine_logs", ascending: false })
+      .limit(20, { referencedTable: "routine_logs" }),
+  );
+  return rows.map(({ routine_exercises, routine_logs, ...r }) => ({ ...r, exercises: routine_exercises.sort((a, b) => a.position - b.position), logs: routine_logs }));
 }
 
 export async function loadDaily(today: string): Promise<DailyItem[]> {

@@ -16,11 +16,12 @@ import {
   startTimer,
   unitFor,
 } from "@/lib/galley";
+import { useStayAwake } from "@/components/stay-awake";
 import { markCooked } from "../../actions";
 
 type Props = { id: string; title: string; ingredients: Ingredient[]; steps: Step[] };
 
-// ---------- sound and screen ----------
+// ---------- sound ----------
 
 let audio: AudioContext | null = null;
 
@@ -48,23 +49,6 @@ function chime() {
       osc.stop(t + 0.85);
     });
   }
-}
-
-/** Keeps the screen on while cooking, and asks again after the tab is hidden and shown. */
-function useStayAwake() {
-  useEffect(() => {
-    let lock: WakeLockSentinel | null = null;
-    const ask = () => {
-      if (document.visibilityState !== "visible" || !("wakeLock" in navigator)) return;
-      navigator.wakeLock.request("screen").then((l) => (lock = l), () => {});
-    };
-    ask();
-    document.addEventListener("visibilitychange", ask);
-    return () => {
-      document.removeEventListener("visibilitychange", ask);
-      void lock?.release();
-    };
-  }, []);
 }
 
 // ---------- the screen ----------
