@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { cache } from "react";
 import { notFound, redirect } from "next/navigation";
 import { type Unlock, readUnlock } from "@/lib/kitchen";
 import { createClient } from "@/lib/supabase/server";
@@ -9,8 +10,12 @@ export type Member = {
   role: "owner" | "trusted" | "guest";
 };
 
-/** The signed-in household member. Anyone not in a household is turned away. */
-export async function currentMember(): Promise<Member> {
+/**
+ * The signed-in household member. Anyone not in a household is turned away.
+ * Asked for by the menu, the page and every card on it, so it's looked up
+ * once per request and shared (React's cache lasts for one request only).
+ */
+export const currentMember = cache(async (): Promise<Member> => {
   const supabase = await createClient();
   const { data } = await supabase.auth.getClaims();
   const id = data?.claims.sub;
@@ -25,7 +30,7 @@ export async function currentMember(): Promise<Member> {
     .maybeSingle();
   if (!member) redirect("/auth/error?error=This account isn't part of the family yet.");
   return { id, householdId: member.household_id, role: member.role };
-}
+});
 
 // ---------- the kitchen screen (The Helm) ----------
 // Both cookies are httpOnly and set only by server actions, so page scripts
