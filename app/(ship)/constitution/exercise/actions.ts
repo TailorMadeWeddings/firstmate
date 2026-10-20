@@ -2,8 +2,10 @@
 
 // Saving exercise records, through the signed-in user's own client:
 // row-level security lets people keep their own, and Captains the children's.
+import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { hashKey } from "@/lib/health";
 import { type Repeat, WEEKDAYS, type Weekday, addDays, dayKey, fromWall, ruleFor, startOfDay } from "@/lib/logbook";
 import { type PersonKey, isPersonKey, personColumns } from "@/lib/medical";
 import { currentMedicalMember } from "@/lib/players";
@@ -270,5 +272,30 @@ export async function tickDaily(itemId: string, isDone: boolean): Promise<Result
     : await supabase.from("daily_ticks").delete().eq("item_id", itemId).eq("day", today);
   if (error) return failed(error);
   done();
+  return null;
+}
+
+// ---------- Apple Health ----------
+
+/** A new key for the iPhone Shortcut, replacing any old one. Shown once: only its hash is kept. */
+export async function makeHealthKey(): Promise<{ key: string } | { error: string }> {
+  const member = await currentMedicalMember();
+  const key = `fm_${randomBytes(32).toString("base64url")}`;
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("health_keys")
+    .upsert({ profile_id: member.id, household_id: member.householdId, key_hash: hashKey(key), created_at: new Date().toISOString(), last_used_at: null });
+  if (error) return { error: failed(error) };
+  revalidatePath("/constitution/exercise");
+  return { key };
+}
+
+/** Stops the Shortcut sending. The numbers already sent stay. */
+export async function dropHealthKey(): Promise<Result> {
+  const member = await currentMedicalMember();
+  const supabase = await createClient();
+  const { error } = await supabase.from("health_keys").delete().eq("profile_id", member.id);
+  if (error) return failed(error);
+  revalidatePath("/constitution/exercise");
   return null;
 }

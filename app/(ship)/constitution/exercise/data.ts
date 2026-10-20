@@ -2,6 +2,7 @@
 // row-level security returns only what they keep: their own, and the
 // children's if they're a Captain.
 import type { ProgramLog, Unit } from "@/lib/exercise";
+import type { HealthDay } from "@/lib/health";
 import { type EventRow, type Occurrence, addDays, dayKey, occurrences, startOfDay } from "@/lib/logbook";
 import { type PersonKey, personColumns } from "@/lib/medical";
 import type { Member } from "@/lib/players";
@@ -117,4 +118,16 @@ export async function loadSession(id: string): Promise<Session | null> {
     .eq("id", id)
     .maybeSingle();
   return error || !data ? null : { ...(data as Session), distance_km: data.distance_km === null ? null : Number(data.distance_km) };
+}
+
+export type HealthKey = { created_at: string; last_used_at: string | null };
+
+/** Your last 90 days from Apple Health, oldest first, and whether a Shortcut key is set up. */
+export async function loadHealth(today: string): Promise<{ days: HealthDay[]; key: HealthKey | null }> {
+  const supabase = await createClient();
+  const [days, key] = await Promise.all([
+    supabase.from("health_daily").select("day, steps, resting_hr, avg_hr, active_kcal, exercise_minutes").gte("day", addDays(today, -89)).order("day"),
+    supabase.from("health_keys").select("created_at, last_used_at").maybeSingle(),
+  ]);
+  return { days: must<HealthDay[]>(days), key: must<HealthKey | null>(key) };
 }

@@ -22,8 +22,8 @@ function ticks(lo: number, hi: number, count = 4): number[] {
 
 /**
  * One measure over time, with the baseline as a dashed reference line and
- * no goal lines. Hover, or tap on a phone, for that week's details. A single
- * series, so the title names it and there's no legend.
+ * no goal lines. Hover, or tap on a phone, for that week's (or day's)
+ * details. A single series, so the title names it and there's no legend.
  */
 export function TrendChart({
   label,
@@ -32,6 +32,7 @@ export function TrendChart({
   baseline,
   height,
   tone,
+  per = "week",
 }: {
   label: string;
   unit: string;
@@ -39,6 +40,7 @@ export function TrendChart({
   baseline: { date: string; value: number } | null;
   height: number;
   tone: "primary" | "muted";
+  per?: "week" | "day";
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -149,13 +151,16 @@ export function TrendChart({
           className="pointer-events-none absolute top-0 z-10 w-56 rounded-xl border bg-popover p-3 text-sm text-popover-foreground shadow-lg"
           style={{ left: Math.min(Math.max(x(shown.date) - 112, 0), Math.max(width - 224, 0)) }}
         >
-          <p className="text-xs text-muted-foreground">Week ending {short(shown.date, { day: "numeric", month: "short", year: "numeric" })}</p>
+          <p className="text-xs text-muted-foreground">
+            {per === "week" ? "Week ending " : ""}
+            {short(shown.date, { ...(per === "day" && { weekday: "short" }), day: "numeric", month: "short", year: "numeric" })}
+          </p>
           <p className="text-lg font-semibold tabular-nums">
             {shown.value} {unit}
             {prev && (
               <span className="ml-2 text-xs font-normal text-muted-foreground">
                 {shown.value - prev.value > 0 ? "+" : shown.value === prev.value ? "±" : "−"}
-                {Math.abs(Math.round((shown.value - prev.value) * 10) / 10)} on the week before
+                {Math.abs(Math.round((shown.value - prev.value) * 10) / 10)} on the {per} before
               </span>
             )}
           </p>

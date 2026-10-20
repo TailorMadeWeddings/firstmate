@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { CalendarClock, Dumbbell, ListChecks, Plus, Trash2 } from "lucide-react";
+import { CalendarClock, Dumbbell, HeartPulse, ListChecks, Plus, Trash2 } from "lucide-react";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { Suspense } from "react";
 import { ActionForm } from "@/components/action-form";
@@ -10,9 +11,12 @@ import { TZ, addDays, dayKey, describeRepeat, startOfDay, weekStart } from "@/li
 import { type PersonKey, isPersonKey } from "@/lib/medical";
 import { currentMedicalMember } from "@/lib/players";
 import { ConstitutionTabs } from "../tabs";
+import { TrendChart } from "../trend-chart";
 import { addActivity, addDailyItem, deleteDailyItem, tickDaily, tickSlot } from "./actions";
-import { type Program, type Slot, loadActivities, loadDaily, loadPeople, loadPrograms } from "./data";
+import { type HealthKey, type Program, type Slot, loadActivities, loadDaily, loadHealth, loadPeople, loadPrograms } from "./data";
+import { HealthLink } from "./health-link";
 import { Tick } from "./tick";
+import type { HealthDay } from "@/lib/health";
 
 export const metadata: Metadata = { title: "Exercise · Constitution · First Mate" };
 
@@ -39,11 +43,14 @@ async function Exercise({ searchParams }: { searchParams: Promise<Search> }) {
   const subject = people.find((p) => p.key === person);
   const self = person === `p:${member.id}`;
   const today = dayKey(new Date());
-  const [{ activities, schedules, sessions, slots }, programs, daily] = await Promise.all([
+  const [{ activities, schedules, sessions, slots }, programs, daily, health] = await Promise.all([
     loadActivities(person, today),
     self ? loadPrograms() : Promise.resolve([] as Program[]),
     self ? loadDaily(today) : Promise.resolve([]),
+    self ? loadHealth(today) : null,
   ]);
+  const h = await headers();
+  const healthUrl = `${h.get("x-forwarded-proto") ?? "https"}://${h.get("host")}/api/health`;
   const todaysSlots = slots.filter((s) => dayKey(s.start) === today);
   const weekFrom = startOfDay(weekStart(today));
   const monthFrom = startOfDay(`${today.slice(0, 8)}01`);
@@ -107,6 +114,8 @@ async function Exercise({ searchParams }: { searchParams: Promise<Search> }) {
           </ul>
         </section>
       )}
+
+      {health && <Health days={health.days} linked={health.key} today={today} url={healthUrl} />}
 
       {slots.length > 0 && (
         <section aria-labelledby="week" className="flex flex-col gap-3">
@@ -254,6 +263,63 @@ async function Exercise({ searchParams }: { searchParams: Promise<Search> }) {
         </section>
       )}
     </>
+  );
+}
+
+const thousands = (n: number) => n.toLocaleString("en-AU");
+
+/** Apple Health, sent by the iPhone Shortcut: today's numbers, a month of steps and three of resting heart rate. */
+function Health({ days, linked, today, url }: { days: HealthDay[]; linked: HealthKey | null; today: string; url: string }) {
+  const latest = days.at(-1);
+  const fresh = latest?.day === today ? latest : null;
+  const monthAgo = addDays(today, -29);
+  const steps = days
+    .filter((d) => d.day >= monthAgo && d.steps !== null)
+    .map((d) => ({
+      date: d.day,
+      value: d.steps!,
+      detail: [d.active_kcal !== null && `${thousands(d.active_kcal)} kcal active`, d.exercise_minutes !== null && `${d.exercise_minutes} min exercise`].filter((x): x is string => Boolean(x)),
+    }));
+  const resting = days
+    .filter((d) => d.resting_hr !== null)
+    .map((d) => ({ date: d.day, value: d.resting_hr!, detail: d.avg_hr === null ? [] : [`Average ${d.avg_hr} bpm through the day`] }));
+  const restingNow = resting.at(-1);
+  const tiles: [string, string][] = [
+    ["Steps today", fresh?.steps != null ? thousands(fresh.steps) : "—"],
+    ["Resting heart rate", restingNow ? `${restingNow.value} bpm` : "—"],
+    ["Active energy today", fresh?.active_kcal != null ? `${thousands(fresh.active_kcal)} kcal` : "—"],
+    ["Exercise today", fresh?.exercise_minutes != null ? formatMinutes(fresh.exercise_minutes) : "—"],
+  ];
+
+  return (
+    <section aria-labelledby="health" className="flex flex-col gap-3">
+      <h2 id="health" className="flex items-center gap-2 font-serif text-2xl font-black">
+        <HeartPulse className="size-5" aria-hidden /> Apple Health
+      </h2>
+      {days.length > 0 && (
+        <>
+          <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {tiles.map(([label, value]) => (
+              <div key={label} className="rounded-2xl border bg-card px-4 py-3">
+                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dd className="text-2xl font-semibold tabular-nums">{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="flex flex-col gap-2 rounded-2xl border bg-card p-4">
+              <h3 className="text-sm font-semibold">Steps, last 30 days</h3>
+              <TrendChart label="Steps" unit="steps" points={steps} baseline={null} height={150} tone="primary" per="day" />
+            </div>
+            <div className="flex flex-col gap-2 rounded-2xl border bg-card p-4">
+              <h3 className="text-sm font-semibold">Resting heart rate, last 90 days</h3>
+              <TrendChart label="Resting heart rate" unit="bpm" points={resting} baseline={null} height={150} tone="muted" per="day" />
+            </div>
+          </div>
+        </>
+      )}
+      <HealthLink linked={linked} url={url} />
+    </section>
   );
 }
 
