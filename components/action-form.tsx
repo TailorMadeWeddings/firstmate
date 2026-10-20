@@ -25,6 +25,9 @@ export function ActionForm({
   const [pending, startTransition] = useTransition();
   return (
     <form
+      // If someone submits before the page's script has loaded, the browser
+      // sends the form itself: POST keeps what they typed out of the address bar.
+      method="post"
       onSubmit={(e) => {
         e.preventDefault();
         if (confirm && !window.confirm(confirm)) return;
