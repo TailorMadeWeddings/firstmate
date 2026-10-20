@@ -7,7 +7,7 @@ import { type NavItem, ShipNav } from "@/components/ship-nav";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Button } from "@/components/ui/button";
 import { IDLE_MINUTES } from "@/lib/kitchen";
-import { canSeeLedger, currentMember, kitchenState } from "@/lib/players";
+import { canSeeConstitution, canSeeLedger, currentMember, kitchenState } from "@/lib/players";
 import { visibleSections } from "@/lib/sections";
 import { lock } from "./helm/actions";
 
@@ -62,7 +62,7 @@ export default function ShipLayout({ children }: { children: React.ReactNode }) 
 async function Nav({ layout }: { layout: "sidebar" | "tabs" }) {
   const member = await currentMember();
   const items: NavItem[] = [
-    ...visibleSections(await canSeeLedger(member)).map((s) => ({ slug: s.slug, name: s.name, href: `/${s.slug}` })),
+    ...visibleSections({ ledger: await canSeeLedger(member), constitution: await canSeeConstitution(member) }).map((s) => ({ slug: s.slug, name: s.name, href: `/${s.slug}` })),
     { slug: "games", name: "Games", href: "/games" },
   ];
   return <ShipNav items={items} layout={layout} />;

@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { textOn } from "@/lib/logbook";
+import { EmergencyCard } from "../constitution/medical/emergency-card";
+import { loadCards } from "../constitution/medical/data";
 import { addChild, updateCrew } from "../logbook/actions";
 import { type CrewMember, currentCrew, loadCrew } from "../logbook/data";
 
@@ -21,7 +23,9 @@ export default function CrewPage() {
 
 async function Crew() {
   const member = await currentCrew();
-  const crew = await loadCrew(member.householdId);
+  // Row-level security lets the crew (Captains and Officers) read the children's emergency cards.
+  const [crew, cards] = await Promise.all([loadCrew(member.householdId), loadCards()]);
+  const kidsCards = crew.filter((c) => c.kind === "dependent" && cards.has(c.key));
   const captain = member.role === "owner";
   // Captains tidy up anyone; everyone else just themselves.
   const canEdit = (c: CrewMember) => captain || (c.kind === "profile" && c.id === member.id);
@@ -69,6 +73,31 @@ async function Crew() {
           </li>
         ))}
       </ul>
+
+      {kidsCards.length > 0 && (
+        <section aria-labelledby="emergency" className="flex flex-col gap-3">
+          <h2 id="emergency" className="font-serif text-2xl font-black">
+            Emergency cards
+          </h2>
+          <p className="text-sm text-muted-foreground">Allergies, conditions, Medicare and the GP, for whoever&apos;s looking after the kids.</p>
+          {kidsCards.map((c) => (
+            <details key={c.key} className="rounded-2xl border bg-card">
+              <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold">
+                <span className="size-3 rounded-full" style={{ background: c.color }} aria-hidden /> {c.name}
+                {cards.get(c.key)?.allergies && <span className="text-xs font-semibold uppercase tracking-wider text-red-600 dark:text-red-400">Allergies</span>}
+              </summary>
+              <div className="flex flex-col gap-3 border-t p-4">
+                <EmergencyCard card={cards.get(c.key) ?? null} />
+                {captain && (
+                  <Link href={`/constitution/medical/card?person=${encodeURIComponent(c.key)}`} className="self-start text-sm font-semibold text-primary hover:underline dark:text-blue-400">
+                    Change {c.name}&apos;s card
+                  </Link>
+                )}
+              </div>
+            </details>
+          ))}
+        </section>
+      )}
 
       {captain && (
         <section className="flex flex-col gap-3 rounded-2xl border bg-card p-4">

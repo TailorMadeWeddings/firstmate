@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { dueLabel, personFor } from "@/lib/duties";
 import { TZ, addDays, dayKey, startOfDay } from "@/lib/logbook";
-import { canSeeLedger, currentMember } from "@/lib/players";
+import { canSeeConstitution, canSeeLedger, currentMember } from "@/lib/players";
 import { sectionIcons, visibleSections } from "@/lib/sections";
 import { createClient } from "@/lib/supabase/server";
 import { loadDuties } from "./duties/data";
@@ -59,7 +59,7 @@ async function Sections() {
   const member = await currentMember();
   return (
     <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {visibleSections(await canSeeLedger(member)).map((s) => {
+      {visibleSections({ ledger: await canSeeLedger(member), constitution: await canSeeConstitution(member) }).map((s) => {
         const Icon = sectionIcons[s.slug];
         return (
           <li key={s.slug}>
