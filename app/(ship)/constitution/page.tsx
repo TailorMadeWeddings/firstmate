@@ -11,6 +11,7 @@ import { dayKey } from "@/lib/logbook";
 import { currentHealthOwner } from "@/lib/players";
 import { startTracking } from "./actions";
 import { CheckinPanel } from "./checkin-panel";
+import { ConstitutionTabs } from "./tabs";
 import { loadHealth } from "./data";
 import { type TrendPoint, TrendChart } from "./trend-chart";
 
@@ -21,7 +22,7 @@ type Search = { checkin?: string };
 export default function ConstitutionPage({ searchParams }: { searchParams: Promise<Search> }) {
   return (
     <div className="flex flex-col gap-8">
-      <header className="flex flex-wrap items-end justify-between gap-4">
+      <header className="flex flex-col gap-3">
         <div className="flex flex-col gap-1">
           <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-muted-foreground">Constitution</p>
           <h1 className="text-4xl">Health and habits</h1>
@@ -29,6 +30,7 @@ export default function ConstitutionPage({ searchParams }: { searchParams: Promi
             <Lock className="size-3.5" aria-hidden /> Only you can see this. Not even the other Captain.
           </p>
         </div>
+        <ConstitutionTabs current="fitness" />
       </header>
       <Suspense fallback={<p className="text-muted-foreground">Loading…</p>}>
         <Constitution searchParams={searchParams} />
