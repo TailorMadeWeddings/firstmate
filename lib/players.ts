@@ -69,6 +69,21 @@ export async function currentOwner(): Promise<Member> {
   return member;
 }
 
+/**
+ * Constitution is personal: Owners only, and never on the kitchen screen,
+ * which anyone in the house can walk up to.
+ */
+export async function canSeeConstitution(member: Member): Promise<boolean> {
+  return member.role === "owner" && !(await kitchenState(member)).kitchen;
+}
+
+/** The signed-in Owner, on their own device. Anyone else gets a 404. */
+export async function currentHealthOwner(): Promise<Member> {
+  const member = await currentMember();
+  if (!(await canSeeConstitution(member))) notFound();
+  return member;
+}
+
 /** Owners and Trusted members (the crew). Guests get a 404, as with the Ledger for non-owners. */
 export async function currentCrew(): Promise<Member> {
   const member = await currentMember();
