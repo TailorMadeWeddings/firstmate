@@ -3,11 +3,10 @@
 import { Check, NotebookText, Repeat as RepeatIcon, Star } from "lucide-react";
 import Link from "next/link";
 import { useOptimistic, useState, useTransition } from "react";
-import { type Duty, REPEATS } from "@/lib/duties";
+import { type Duty, type Person, REPEATS } from "@/lib/duties";
 import { textOn } from "@/lib/logbook";
 import { setDone } from "./actions";
 
-type Person = { name: string; color: string };
 
 /** One duty: tick it off (it greys out at once; the server catches up), or open it to change it. */
 export function DutyRow({ duty, due, overdue, person }: { duty: Duty; due: string | null; overdue: boolean; person: Person | null }) {

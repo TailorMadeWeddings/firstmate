@@ -6,10 +6,10 @@ import { ActionForm } from "@/components/action-form";
 import { LiveRefresh } from "@/components/live-refresh";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { type Duty, GROUPS, dueLabel, groupOf, grouped } from "@/lib/duties";
+import { type Duty, GROUPS, dueLabel, groupOf, grouped, personFor } from "@/lib/duties";
 import { dayKey } from "@/lib/logbook";
 import { currentCrew } from "@/lib/players";
-import { type CrewMember, loadCrew } from "../logbook/data";
+import { loadCrew } from "../logbook/data";
 import { addDuty } from "./actions";
 import { loadDuties } from "./data";
 import { CategoryList, RepeatSelect, WhoSelect } from "./duty-fields";
@@ -126,8 +126,3 @@ async function Duties({ searchParams }: { searchParams: Promise<Search> }) {
     </>
   );
 }
-
-const personFor = (d: Duty, crew: CrewMember[]) => {
-  const c = crew.find((x) => x.key === d.assignee);
-  return c ? { name: c.name, color: c.color } : null;
-};

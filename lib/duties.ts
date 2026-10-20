@@ -27,6 +27,14 @@ export type Duty = {
   created_at: string;
 };
 
+export type Person = { name: string; color: string };
+
+/** The crew member a duty is for, if any. */
+export const personFor = (d: Duty, crew: { key: string; name: string; color: string }[]): Person | null => {
+  const c = crew.find((x) => x.key === d.assignee);
+  return c ? { name: c.name, color: c.color } : null;
+};
+
 /** A month or year on, keeping the day where the month has it (31 Jan → 28 Feb). */
 function addMonths(day: string, months: number): string {
   const [y, m, d] = day.split("-").map(Number);
@@ -57,6 +65,13 @@ export function nextDue(due: string, repeat: Repeat, today: string): string {
   while (next <= today) next = step(next, repeat);
   return next;
 }
+
+/** On the Logbook: a day's duties. Today also carries any left over from before. */
+export const dutiesOn = (day: string, duties: Duty[], today: string) =>
+  duties.filter((d) => d.due_on === day || (day === today && d.due_on !== null && d.due_on < today));
+
+/** Whether the Logbook shows duties too; remembered per device. */
+export const LOGBOOK_DUTIES_COOKIE = "fm_logbook_duties";
 
 export const GROUPS = {
   overdue: "Overdue",

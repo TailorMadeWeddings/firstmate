@@ -4,8 +4,10 @@
 // signed-in user's own client, so row-level security decides what's allowed:
 // crew add events, Captains change anything, Officers change their own.
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { type Repeat, type Weekday, WEEKDAYS, addDays, dayKey, fromWall, ruleFor, startOfDay } from "@/lib/logbook";
+import { LOGBOOK_DUTIES_COOKIE } from "@/lib/duties";
 import { createClient } from "@/lib/supabase/server";
 import { currentCrew } from "./data";
 
@@ -204,4 +206,13 @@ export async function addChild(_: Result, form: FormData): Promise<Result> {
   if (error) return error.code === "42501" ? "Only Captains can add crew." : problem(error);
   revalidatePath("/", "layout");
   return null;
+}
+
+/** Shows or hides duties on the Logbook, on this device. */
+export async function toggleLogbookDuties(): Promise<void> {
+  await currentCrew();
+  const jar = await cookies();
+  const on = jar.get(LOGBOOK_DUTIES_COOKIE)?.value === "1";
+  jar.set(LOGBOOK_DUTIES_COOKIE, on ? "0" : "1", { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax", httpOnly: true });
+  revalidatePath("/logbook", "layout");
 }
