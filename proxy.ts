@@ -14,8 +14,9 @@ export const config = {
      * - favicon.ico (favicon file)
      * - images - .svg, .png, .jpg, .jpeg, .gif, .webp
      * - api/health, api/mcp (the iPhone Shortcut and Claude sign in with a key, not a session)
+     * - .well-known, oauth/register, oauth/token (how apps find and finish signing in)
      * Feel free to modify this pattern to include more paths.
      */
-    "/((?!_next/static|_next/image|favicon.ico|api/health|api/mcp|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/health|api/mcp|\\.well-known|oauth/register|oauth/token|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
