@@ -1,14 +1,16 @@
 // First Mate as an MCP server, for Claude: the Logbook (calendar), Duties
-// (tasks) and the Galley (recipes, and meals planned on the Logbook).
+// (tasks), the Galley (recipes, and meals planned on the Logbook) and your
+// own gym routines.
 // Signs in as a person: with a token from OAuth (Claude's connector, see
 // app/oauth) or their key from Exercise, as Authorization: Bearer fm_…
 // The secret key skips row-level security, so every tool keeps to the key
 // holder's household and checks what the policies would.
 import { NextResponse } from "next/server";
 import { REPEATS, type Repeat, nextDue } from "@/lib/duties";
+import { DAY_SHORT, type RoutineExercise, exercisesFrom, weekdaysFrom } from "@/lib/exercise";
 import { findRecipes, ingredientLine, type RecipeCard } from "@/lib/galley";
 import { hashKey } from "@/lib/health";
-import { type EventRow, type ExceptionRow, addDays, dayKey, describeRepeat, fromWall, occurrences, startOfDay, wallOf } from "@/lib/logbook";
+import { type EventRow, type ExceptionRow, WEEKDAYS, addDays, dayKey, describeRepeat, fromWall, occurrences, startOfDay, wallOf } from "@/lib/logbook";
 import { Problem, type Tool, answer } from "@/lib/mcp";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -18,7 +20,9 @@ type Ctx = { db: Admin; me: string; household: string; owner: boolean };
 const INSTRUCTIONS =
   "First Mate is the family's organiser. Dates are YYYY-MM-DD and times HH:MM, both in Sydney. " +
   "The Logbook is the calendar; Duties are the to-do list; the Galley is the cookbook. " +
-  "To plan meals, find recipes with list_recipes (get_recipes has ingredients and steps), then put each meal on the Logbook with add_event and its recipe_id.";
+  "To plan meals, find recipes with list_recipes (get_recipes has ingredients and steps), then put each meal on the Logbook with add_event and its recipe_id. " +
+  "Routines are the signed-in person's own gym workouts, opened on their phone at the gym and logged there. " +
+  "For the weekly progression, read get_routines (its recent_logs show what was actually done), then update_routine.";
 
 // ---------- arguments ----------
 
@@ -88,6 +92,83 @@ function keysFor(names: unknown, everyone: { key: string; name: string }[]): str
 }
 
 const canDelete = (ctx: Ctx, createdBy: string) => ctx.owner || createdBy === ctx.me;
+
+// ---------- routines: always the signed-in person's own (exercise is private) ----------
+
+const ROUTINE = "id, name, category, description, warm_up, progression, link, rest_seconds, weekdays";
+const EXERCISES = "routine_exercises(position, name, sets, reps, rep_unit, load, cue)";
+type RoutineRow = {
+  id: string; name: string; category: string | null; description: string | null; warm_up: string | null; progression: string | null;
+  link: string | null; rest_seconds: number | null; weekdays: string[];
+  routine_exercises: (RoutineExercise & { position: number })[];
+};
+
+const days = (weekdays: string[]) => WEEKDAYS.filter((d) => weekdays.includes(d)).map((d) => DAY_SHORT[d]);
+
+async function myRoutine(ctx: Ctx, routineId: string) {
+  const { data, error } = await ctx.db.from("routines").select(`${ROUTINE}, ${EXERCISES}`).eq("id", routineId).eq("household_id", ctx.household).eq("profile_id", ctx.me).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Problem("No routine of yours with that id. list_routines has them.");
+  return data as RoutineRow;
+}
+
+/** A routine from the arguments; for an update, anything left out stays as it was. */
+function routineFrom(args: Record<string, unknown>, was?: RoutineRow) {
+  const given = (key: string) => key in args;
+  const name = given("name") || !was ? str(args, "name", 60) : was.name;
+  if (!name) throw new Problem("Give the routine a name.");
+  const link = given("link") || !was ? str(args, "link", 500) : was.link;
+  if (link && !/^https?:\/\/\S+$/.test(link)) throw new Problem("link should be a web address, starting https://");
+  let rest = was?.rest_seconds ?? null;
+  if (given("rest_seconds")) {
+    rest = args.rest_seconds === null ? null : Number(args.rest_seconds);
+    if (rest !== null && !(Number.isInteger(rest) && rest >= 0 && rest <= 600)) throw new Problem("rest_seconds should be a whole number, 0 to 600.");
+  }
+  const weekdays = given("days") ? weekdaysFrom(args.days ?? []) : (was?.weekdays ?? []);
+  if (typeof weekdays === "string") throw new Problem(weekdays);
+  const exercises = given("exercises") || !was ? exercisesFrom(args.exercises) : was.routine_exercises.sort((a, b) => a.position - b.position);
+  if (typeof exercises === "string") throw new Problem(exercises);
+  const kept = (key: "category" | "description" | "warm_up" | "progression", max: number) => (given(key) || !was ? str(args, key, max) : was[key]);
+  return {
+    p_name: name, p_category: kept("category", 40), p_description: kept("description", 2000), p_warm_up: kept("warm_up", 2000),
+    p_progression: kept("progression", 2000), p_link: link, p_rest_seconds: rest, p_weekdays: weekdays,
+    p_exercises: exercises.map(({ name, sets, reps, rep_unit, load, cue }) => ({ name, sets, reps, rep_unit, load, cue })),
+  };
+}
+
+async function saveRoutine(ctx: Ctx, routineId: string | null, fields: ReturnType<typeof routineFrom>) {
+  const { data, error } = await ctx.db.rpc("exercise_save_routine", { p_routine: routineId, p_household: ctx.household, p_profile: ctx.me, ...fields });
+  if (error) throw error;
+  return data as string;
+}
+
+const routineFields = {
+  name: { type: "string" },
+  category: { type: "string", description: "A short group, like Golf or Legs." },
+  description: { type: "string" },
+  days: { type: "array", items: { type: "string", enum: Object.values(DAY_SHORT) }, description: "Which days it's done, like [\"Mon\", \"Wed\", \"Fri\"]. It shows under Today on those days." },
+  rest_seconds: { type: "integer", description: "Rest between sets." },
+  warm_up: { type: "string" },
+  progression: { type: "string", description: "How it steps up week to week." },
+  link: { type: "string", description: "Where it came from, like a video to watch. https:// only." },
+  exercises: {
+    type: "array",
+    description: "In order. On update_routine this replaces the whole list: send every exercise back, with your changes.",
+    items: {
+      type: "object",
+      properties: {
+        order: { type: "integer" },
+        name: { type: "string" },
+        sets: { type: "integer" },
+        reps: { type: "integer", description: "Per set: reps, or seconds held when rep_unit is seconds." },
+        rep_unit: { type: "string", enum: ["reps", "per_side", "seconds"], description: "reps (in all), per_side (each side), or seconds. Defaults to reps." },
+        load: { type: "string", description: "Free text, like \"5-8 kg DB\" or \"Bodyweight\"." },
+        cue: { type: "string", description: "A coaching cue." },
+      },
+      required: ["name", "sets", "reps"],
+    },
+  },
+};
 
 // ---------- tools ----------
 
@@ -413,6 +494,111 @@ const TOOLS: Record<string, Tool<Ctx>> = {
         ingredients: recipe_ingredients.sort(byPosition).map(ingredientLine),
         method: recipe_steps.sort(byPosition).map((s) => s.instruction),
       }));
+    },
+  },
+
+  list_routines: {
+    description: "Your gym routines (private to you): name, category, days and when each was last done. search matches name and category.",
+    input: { type: "object", properties: { search: { type: "string" } } },
+    run: async (args, ctx) => {
+      type Row = { id: string; name: string; category: string | null; weekdays: string[]; routine_logs: { done_on: string }[] };
+      const found = rows<Row[]>(
+        await ctx.db
+          .from("routines")
+          .select("id, name, category, weekdays, routine_logs(done_on)")
+          .eq("household_id", ctx.household)
+          .eq("profile_id", ctx.me)
+          .order("name")
+          .order("done_on", { referencedTable: "routine_logs", ascending: false })
+          .limit(1, { referencedTable: "routine_logs" }),
+      );
+      const words = (str(args, "search") ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+      return found
+        .filter((r) => words.every((w) => `${r.name} ${r.category ?? ""}`.toLowerCase().includes(w)))
+        .map((r) => ({ id: r.id, name: r.name, category: r.category, days: days(r.weekdays), last_done: r.routine_logs[0]?.done_on ?? null }));
+    },
+  },
+
+  get_routines: {
+    description: "Routines in full, with their exercises in order and the last five logs (what was actually done, set by set).",
+    input: { type: "object", properties: { ids: { type: "array", items: { type: "string" }, maxItems: 30 } }, required: ["ids"] },
+    run: async (args, ctx) => {
+      const ids = Array.isArray(args.ids) ? args.ids.map(String).filter((s) => UUID.test(s)).slice(0, 30) : [];
+      if (!ids.length) throw new Problem("Give routine ids from list_routines.");
+      type Row = RoutineRow & { routine_logs: { done_on: string; notes: string | null; done: unknown }[] };
+      const found = rows<Row[]>(
+        await ctx.db
+          .from("routines")
+          .select(`${ROUTINE}, ${EXERCISES}, routine_logs(done_on, notes, done)`)
+          .eq("household_id", ctx.household)
+          .eq("profile_id", ctx.me)
+          .in("id", ids)
+          .order("done_on", { referencedTable: "routine_logs", ascending: false })
+          .limit(5, { referencedTable: "routine_logs" }),
+      );
+      return found.map(({ weekdays, routine_exercises, routine_logs, ...r }) => ({
+        ...r,
+        days: days(weekdays),
+        exercises: routine_exercises.sort((a, b) => a.position - b.position).map(({ position, ...e }) => ({ order: position, ...e })),
+        recent_logs: routine_logs.map((l) => ({ date: l.done_on, notes: l.notes, done: l.done })),
+      }));
+    },
+  },
+
+  add_routine: {
+    description: "Adds a gym routine for you: an ordered list of exercises with sets, reps and load.",
+    input: { type: "object", properties: routineFields, required: ["name", "exercises"] },
+    run: async (args, ctx) => {
+      const fields = routineFrom(args);
+      return { added: await saveRoutine(ctx, null, fields), name: fields.p_name };
+    },
+  },
+
+  update_routine: {
+    description: "Changes a routine: give only what changes. exercises replaces the whole list, so to change one exercise send them all back from get_routines.",
+    input: { type: "object", properties: { routine_id: { type: "string" }, ...routineFields }, required: ["routine_id"] },
+    run: async (args, ctx) => {
+      const routineId = id(args, "routine_id");
+      const fields = routineFrom(args, await myRoutine(ctx, routineId));
+      await saveRoutine(ctx, routineId, fields);
+      return `Saved ${fields.p_name}.`;
+    },
+  },
+
+  delete_routine: {
+    description: "Deletes a routine and its logs for good.",
+    input: { type: "object", properties: { routine_id: { type: "string" } }, required: ["routine_id"] },
+    run: async (args, ctx) => {
+      const routine = await myRoutine(ctx, id(args, "routine_id"));
+      const { error } = await ctx.db.from("routines").delete().eq("id", routine.id);
+      if (error) throw error;
+      return `Deleted ${routine.name}.`;
+    },
+  },
+
+  log_routine: {
+    description: "Logs a routine as done, as written (put anything different in notes). Usually it's logged in the app at the gym; this is for \"I did it yesterday\".",
+    input: {
+      type: "object",
+      properties: { routine_id: { type: "string" }, date: { type: "string", description: "YYYY-MM-DD. Defaults to today." }, notes: { type: "string" } },
+      required: ["routine_id"],
+    },
+    run: async (args, ctx) => {
+      const routine = await myRoutine(ctx, id(args, "routine_id"));
+      const date = day(args, "date") ?? dayKey(new Date());
+      if (date > dayKey(new Date())) throw new Problem("That's in the future; log it once it's done.");
+      const { error } = await ctx.db.from("routine_logs").insert({
+        routine_id: routine.id,
+        household_id: ctx.household,
+        profile_id: ctx.me,
+        done_on: date,
+        notes: str(args, "notes"),
+        done: routine.routine_exercises
+          .sort((a, b) => a.position - b.position)
+          .map((e) => ({ name: e.name, rep_unit: e.rep_unit, reps: Array(e.sets).fill(e.reps), load: e.load })),
+      });
+      if (error) throw error;
+      return `Logged ${routine.name} on ${date}.`;
     },
   },
 };

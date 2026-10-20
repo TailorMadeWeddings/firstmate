@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type ProgramLog, amount, dayNames, formatMinutes, isTrainingDay, minutesIn, programState, workoutFor } from "./exercise.ts";
+import { type ProgramLog, amount, dayNames, exercisesFrom, formatMinutes, isTrainingDay, minutesIn, prescription, programState, weekdaysFrom, workoutFor } from "./exercise.ts";
 
 test("hours add up, and read naturally", () => {
   const sessions = [
@@ -52,4 +52,27 @@ test("training days, day names and amounts", () => {
   assert.equal(amount(12, "reps"), "12");
   assert.equal(amount(45, "seconds"), "45 s");
   assert.equal(amount(90, "seconds"), "1 min 30 s");
+});
+
+test("routines: days and exercises from Claude, and how they read", () => {
+  assert.deepEqual(weekdaysFrom(["Fri", "monday", "WE"]), ["MO", "WE", "FR"]);
+  assert.match(weekdaysFrom(["Funday"]) as string, /isn't a day/);
+  assert.match(weekdaysFrom("Mon") as string, /list/);
+
+  const got = exercisesFrom([
+    { order: 2, name: "Plank press", sets: 3, reps: 8, rep_unit: "per_side", load: "5-8 kg DB", cue: "Feet wide" },
+    { order: 1, name: " Plate rotations ", sets: 3, reps: 12, load: "" },
+  ]);
+  assert.deepEqual(got, [
+    { name: "Plate rotations", sets: 3, reps: 12, rep_unit: "reps", load: null, cue: null },
+    { name: "Plank press", sets: 3, reps: 8, rep_unit: "per_side", load: "5-8 kg DB", cue: "Feet wide" },
+  ]);
+  assert.match(exercisesFrom([]) as string, /at least one/);
+  assert.match(exercisesFrom([{ name: "Chop", sets: 3, reps: 12, rep_unit: "total" }]) as string, /rep_unit/);
+  assert.match(exercisesFrom([{ name: "Chop", sets: 2.5, reps: 12 }]) as string, /sets/);
+  assert.match(exercisesFrom([{ sets: 3, reps: 12 }]) as string, /needs a name/);
+
+  assert.equal(prescription(3, 12, "reps"), "3 × 12");
+  assert.equal(prescription(3, 8, "per_side"), "3 × 8 per side");
+  assert.equal(prescription(3, 30, "seconds"), "3 × 30 s");
 });

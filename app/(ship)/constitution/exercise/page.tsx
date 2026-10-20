@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { CalendarClock, Dumbbell, HeartPulse, ListChecks, Plus, Trash2 } from "lucide-react";
+import { CalendarClock, ClipboardList, Dumbbell, HeartPulse, ListChecks, Plus, Trash2 } from "lucide-react";
 import { headers } from "next/headers";
 import Link from "next/link";
 import { Suspense } from "react";
@@ -13,7 +13,7 @@ import { currentMedicalMember } from "@/lib/players";
 import { ConstitutionTabs } from "../tabs";
 import { TrendChart } from "../trend-chart";
 import { addActivity, addDailyItem, deleteDailyItem, tickDaily, tickSlot } from "./actions";
-import { type HealthKey, type Program, type Slot, loadActivities, loadDaily, loadHealth, loadPeople, loadPrograms } from "./data";
+import { type HealthKey, type Program, type Routine, type Slot, loadActivities, loadDaily, loadHealth, loadPeople, loadPrograms, loadRoutines } from "./data";
 import { HealthLink } from "./health-link";
 import { Tick } from "./tick";
 import type { HealthDay } from "@/lib/health";
@@ -43,9 +43,10 @@ async function Exercise({ searchParams }: { searchParams: Promise<Search> }) {
   const subject = people.find((p) => p.key === person);
   const self = person === `p:${member.id}`;
   const today = dayKey(new Date());
-  const [{ activities, schedules, sessions, slots }, programs, daily, health] = await Promise.all([
+  const [{ activities, schedules, sessions, slots }, programs, routines, daily, health] = await Promise.all([
     loadActivities(person, today),
     self ? loadPrograms() : Promise.resolve([] as Program[]),
+    self ? loadRoutines() : Promise.resolve([] as Routine[]),
     self ? loadDaily(today) : Promise.resolve([]),
     self ? loadHealth(today) : null,
   ]);
@@ -57,6 +58,7 @@ async function Exercise({ searchParams }: { searchParams: Promise<Search> }) {
   const yearFrom = startOfDay(`${today.slice(0, 5)}01-01`);
   const end = startOfDay(addDays(today, 1));
   const dueToday = programs.filter((p) => p.active && isTrainingDay(p.weekdays, today) && !p.logs.some((l) => l.done_on === today));
+  const routinesToday = routines.filter((r) => isTrainingDay(r.weekdays, today) && r.logs[0]?.done_on !== today);
 
   return (
     <>
@@ -88,7 +90,7 @@ async function Exercise({ searchParams }: { searchParams: Promise<Search> }) {
         </nav>
       )}
 
-      {self && (daily.length > 0 || dueToday.length > 0 || todaysSlots.length > 0) && (
+      {self && (daily.length > 0 || dueToday.length > 0 || routinesToday.length > 0 || todaysSlots.length > 0) && (
         <section aria-labelledby="today" className="flex flex-col gap-3 rounded-2xl border bg-card p-5">
           <h2 id="today" className="font-serif text-2xl font-black">
             Today
@@ -102,6 +104,14 @@ async function Exercise({ searchParams }: { searchParams: Promise<Search> }) {
                 <Dumbbell className="size-5 shrink-0 text-muted-foreground" aria-hidden />
                 <Link href={`/constitution/exercise/program/${p.id}`} className="flex-1 font-medium hover:underline">
                   {p.name}: {programState(p.logs, p.goal, p.unit).next.kind === "test" ? "test day" : "today's workout"}
+                </Link>
+              </li>
+            ))}
+            {routinesToday.map((r) => (
+              <li key={r.id} className="flex items-center gap-3 py-2.5">
+                <ClipboardList className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+                <Link href={`/constitution/exercise/routine/${r.id}`} className="flex-1 font-medium hover:underline">
+                  {r.name}
                 </Link>
               </li>
             ))}
@@ -231,6 +241,31 @@ async function Exercise({ searchParams }: { searchParams: Promise<Search> }) {
                   </li>
                 );
               })}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {self && (
+        <section aria-labelledby="routines" className="flex flex-col gap-3">
+          <h2 id="routines" className="flex items-center gap-2 font-serif text-2xl font-black">
+            <ClipboardList className="size-5" aria-hidden /> Routines
+          </h2>
+          {routines.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Gym workouts with sets, reps and weights, to open on your phone and log as you go. Ask Claude to add one.</p>
+          ) : (
+            <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {routines.map((r) => (
+                <li key={r.id}>
+                  <Link href={`/constitution/exercise/routine/${r.id}`} className="flex flex-col gap-1 rounded-2xl border bg-card p-4 hover:bg-muted/50">
+                    <span className="font-serif text-xl font-black">{r.name}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {[r.category, r.weekdays.length > 0 && dayNames(r.weekdays), `${r.exercises.length} exercises`].filter(Boolean).join(" · ")}
+                    </span>
+                    <span className="text-sm">{r.logs[0] ? `Last done ${day(new Date(`${r.logs[0].done_on}T00:00:00Z`))}` : "Not done yet"}</span>
+                  </Link>
+                </li>
+              ))}
             </ul>
           )}
         </section>
