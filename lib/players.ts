@@ -97,6 +97,19 @@ export async function currentHealthOwner(): Promise<Member> {
   return member;
 }
 
+/**
+ * Voyage is personal too: the crew, on their own device. Captains keep the
+ * books; Officers tell stories (row-level security shows them only theirs).
+ */
+export const currentVoyageMember = currentMedicalMember;
+
+/** A Captain, on their own device: the books themselves. Officers go to their stories. */
+export async function currentVoyageCaptain(): Promise<Member> {
+  const member = await currentVoyageMember();
+  if (member.role !== "owner") redirect("/voyage/stories");
+  return member;
+}
+
 /** Owners and Trusted members (the crew). Guests get a 404, as with the Ledger for non-owners. */
 export async function currentCrew(): Promise<Member> {
   const member = await currentMember();

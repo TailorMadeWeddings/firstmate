@@ -4,21 +4,9 @@ import { Camera, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { PHOTO_BUCKET } from "@/lib/galley";
+import { shrink } from "@/lib/photos";
 import { createClient } from "@/lib/supabase/client";
 import { setRecipePhoto } from "../actions";
-
-const LONGEST_SIDE = 1600;
-
-/** A phone photo, upright and shrunk to a sensible size, as a JPEG. */
-async function shrink(file: File): Promise<Blob> {
-  const image = await createImageBitmap(file, { imageOrientation: "from-image" });
-  const scale = Math.min(1, LONGEST_SIDE / Math.max(image.width, image.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(image.width * scale);
-  canvas.height = Math.round(image.height * scale);
-  canvas.getContext("2d")!.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("no image"))), "image/jpeg", 0.85));
-}
 
 /** Add, change or remove a recipe's photo. Storage's own policies check it's yours to change. */
 export function PhotoPicker({ recipeId, hasPhoto }: { recipeId: string; hasPhoto: boolean }) {

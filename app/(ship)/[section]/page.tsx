@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { sections } from "@/lib/sections";
 
-const BUILT: string[] = ["ledger", "logbook", "galley", "duties", "constitution"];
+const BUILT: string[] = ["ledger", "logbook", "galley", "duties", "constitution", "voyage"];
 
 // Sections that aren't built yet. Each gets its own folder once it is;
 // anything else is a 404 below.
