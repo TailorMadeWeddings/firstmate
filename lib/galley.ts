@@ -31,6 +31,7 @@ const UNITS = new Map(
     packet: ["packet", "packets", "pkt"],
     stick: ["stick", "sticks"],
     dash: ["dash", "dashes"],
+    cm: ["cm", "centimetre", "centimetres", "centimeter", "centimeters"],
   }).flatMap(([unit, words]) => words.map((w) => [w, unit] as const)),
 );
 

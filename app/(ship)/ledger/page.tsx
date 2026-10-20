@@ -97,9 +97,10 @@ async function LedgerHome({ searchParams }: { searchParams: Search }) {
 
   return (
     <div className="flex flex-col gap-8">
-      <header className="flex items-baseline justify-between gap-4">
+      <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
         <h1 className="text-3xl font-bold">Ledger</h1>
-        <nav className="flex gap-4 text-sm">
+        {/* Wraps under the title on a phone rather than running off the side. */}
+        <nav className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
           {["reports", "budgets", "bills", "goals", "categories"].map((page) => (
             <Link key={page} href={`/ledger/${page}`} className="capitalize hover:underline">
               {page}
