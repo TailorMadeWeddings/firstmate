@@ -1,12 +1,15 @@
-import { ChefHat } from "lucide-react";
+import { ChefHat, ClipboardCheck } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { Button } from "@/components/ui/button";
+import { dueLabel, personFor } from "@/lib/duties";
 import { TZ, addDays, dayKey, startOfDay } from "@/lib/logbook";
 import { canSeeLedger, currentMember } from "@/lib/players";
 import { sectionIcons, visibleSections } from "@/lib/sections";
 import { createClient } from "@/lib/supabase/server";
-import { loadEntries } from "./logbook/data";
+import { loadDuties } from "./duties/data";
+import { DutyRow } from "./duties/duty-row";
+import { loadCrew, loadEntries } from "./logbook/data";
 
 export default function Home() {
   return (
@@ -14,9 +17,14 @@ export default function Home() {
       <Suspense fallback={<div className="h-28" />}>
         <Masthead />
       </Suspense>
-      <Suspense>
-        <Tonight />
-      </Suspense>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Suspense>
+          <Tonight />
+        </Suspense>
+        <Suspense>
+          <DueToday />
+        </Suspense>
+      </div>
       <Suspense>
         <Sections />
       </Suspense>
@@ -98,6 +106,36 @@ async function Tonight() {
               </Link>
             </Button>
           </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Duties due today, and any left over from before, ready to tick off. */
+async function DueToday() {
+  const member = await currentMember();
+  if (member.role === "guest") return null;
+  const today = dayKey(new Date());
+  const [{ open }, crew] = await Promise.all([loadDuties(), loadCrew(member.householdId)]);
+  const due = open
+    .filter((d) => d.due_on && d.due_on <= today)
+    .sort((a, b) => Number(b.important) - Number(a.important) || a.due_on!.localeCompare(b.due_on!));
+  if (due.length === 0) return null;
+  const SHOWN = 6;
+  return (
+    <section aria-labelledby="due-today" className="flex flex-col gap-2 rounded-2xl border bg-card p-6 shadow-sm">
+      <h2 id="due-today" className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.3em] text-muted-foreground">
+        <span className="flex items-center gap-2">
+          <ClipboardCheck className="size-4" aria-hidden /> Due today
+        </span>
+        <Link href="/duties" className="normal-case tracking-normal text-primary hover:underline dark:text-blue-400">
+          {due.length > SHOWN ? `All ${due.length}` : "All duties"} →
+        </Link>
+      </h2>
+      <ul className="-mx-4 divide-y">
+        {due.slice(0, SHOWN).map((d) => (
+          <DutyRow key={d.id} duty={d} due={d.due_on! < today ? dueLabel(d.due_on!, today) : null} overdue={d.due_on! < today} person={personFor(d, crew)} />
         ))}
       </ul>
     </section>

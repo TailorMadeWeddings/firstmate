@@ -1,8 +1,9 @@
-import { CalendarDays, Coins, CookingPot, Dices, HeartPulse, Images, type LucideIcon } from "lucide-react";
+import { CalendarDays, ClipboardCheck, Coins, CookingPot, Dices, HeartPulse, Images, type LucideIcon } from "lucide-react";
 
-// The five sections of the ship, in nav order.
+// The sections of the ship, in nav order.
 export const sections = [
   { slug: "logbook", name: "Logbook", blurb: "The family calendar: who's doing what, and when." },
+  { slug: "duties", name: "Duties", blurb: "The family to-do list: who's doing what, by when." },
   { slug: "galley", name: "Galley", blurb: "Recipes, meal plans and cooking mode." },
   { slug: "constitution", name: "Constitution", blurb: "Health and habits, private to each person." },
   { slug: "ledger", name: "Ledger", blurb: "Accounts, bills and savings goals.", ownersOnly: true },
@@ -18,6 +19,7 @@ export const visibleSections = (showLedger: boolean) =>
 /** One icon per section (and Games), shared by the nav and the home page. */
 export const sectionIcons: Record<string, LucideIcon> = {
   logbook: CalendarDays,
+  duties: ClipboardCheck,
   galley: CookingPot,
   constitution: HeartPulse,
   ledger: Coins,

@@ -1,8 +1,10 @@
 // The Logbook's three views, after the AI Studio mock-up: the week grid
 // (also the day view, with one column), and the agenda list for phones.
 import Link from "next/link";
-import { ChefHat, Plus } from "lucide-react";
+import { ChefHat, ClipboardCheck, Plus } from "lucide-react";
+import { type Duty, dueLabel, dutiesOn, personFor } from "@/lib/duties";
 import { TZ, addDays, dayKey, describeRepeat, lanes, startOfDay, textOn, wallOf } from "@/lib/logbook";
+import { DutyRow } from "../duties/duty-row";
 import type { CrewMember, Entry } from "./data";
 
 const FIRST_HOUR = 6;
@@ -49,11 +51,14 @@ const colourOf = (e: Entry, crew: CrewMember[]) => crew.find((c) => c.key === e.
 export function TimeGrid({
   days,
   entries,
+  duties = [],
   crew,
   big = false,
 }: {
   days: string[];
   entries: Entry[];
+  /** Open duties, shown on the day they're due (shown only when the Duties toggle is on). */
+  duties?: Duty[];
   crew: CrewMember[];
   big?: boolean;
 }) {
@@ -73,6 +78,7 @@ export function TimeGrid({
           {days.map((day) => {
             const isToday = day === today;
             const allDay = entries.filter((e) => e.allDay && dayKey(e.start) <= day && day < dayKey(e.end));
+            const dayDuties = dutiesOn(day, duties, today);
             return (
               <div key={day} className={`relative flex min-w-0 flex-1 flex-col border-r last:border-r-0 ${isToday ? "bg-primary/[0.04]" : ""}`}>
                 {isToday && <span className="absolute inset-x-0 top-0 h-1 bg-primary" aria-hidden />}
@@ -95,6 +101,22 @@ export function TimeGrid({
                     <Plus className="size-4" aria-hidden />
                   </Link>
                 </div>
+                {dayDuties.length > 0 && (
+                  <ul className="flex flex-col gap-1 px-1.5 pb-1.5" aria-label="Duties">
+                    {dayDuties.map((d) => (
+                      <li key={d.id}>
+                        <Link
+                          href={`/duties/${d.id}`}
+                          className={`flex items-center gap-1 rounded-md border border-dashed bg-card px-2 py-0.5 ${big ? "text-base" : "text-xs"} ${d.due_on! < today ? "text-red-600 dark:text-red-400" : ""}`}
+                          style={{ borderColor: personFor(d, crew)?.color }}
+                        >
+                          <ClipboardCheck className="size-3.5 shrink-0" aria-label="Duty:" />
+                          <span className="truncate">{d.title}</span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 {allDay.length > 0 && (
                   <div className="flex flex-col gap-1 px-1.5 pb-1.5">
                     {allDay.map((e) => (
@@ -180,14 +202,15 @@ export function TimeGrid({
 }
 
 /** Upcoming events as a list, grouped by day: the phone's view. */
-export function Agenda({ from, days, entries, crew }: { from: string; days: number; entries: Entry[]; crew: CrewMember[] }) {
+export function Agenda({ from, days, entries, duties = [], crew }: { from: string; days: number; entries: Entry[]; duties?: Duty[]; crew: CrewMember[] }) {
   const today = dayKey(new Date());
   const list = Array.from({ length: days }, (_, i) => addDays(from, i))
     .map((day) => ({
       day,
       items: entries.filter((e) => (e.allDay ? dayKey(e.start) <= day && day < dayKey(e.end) : dayKey(e.start) === day)),
+      duties: dutiesOn(day, duties, today),
     }))
-    .filter((d) => d.items.length > 0);
+    .filter((d) => d.items.length + d.duties.length > 0);
 
   if (list.length === 0) {
     return (
@@ -202,7 +225,7 @@ export function Agenda({ from, days, entries, crew }: { from: string; days: numb
 
   return (
     <ol className="flex flex-col gap-6">
-      {list.map(({ day, items }) => (
+      {list.map(({ day, items, duties: dayDuties }) => (
         <li key={day} className="flex flex-col gap-2">
           <h2 className="flex items-baseline gap-2">
             <span className={`font-serif text-2xl font-black italic ${day === today ? "text-primary dark:text-blue-400" : ""}`}>
@@ -236,6 +259,9 @@ export function Agenda({ from, days, entries, crew }: { from: string; days: numb
                 </li>
               );
             })}
+            {dayDuties.map((d) => (
+              <DutyRow key={d.id} duty={d} due={d.due_on! < day ? dueLabel(d.due_on!, today) : null} overdue={d.due_on! < today} person={personFor(d, crew)} />
+            ))}
           </ul>
         </li>
       ))}
