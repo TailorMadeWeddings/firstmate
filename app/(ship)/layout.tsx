@@ -46,7 +46,7 @@ export default function ShipLayout({ children }: { children: React.ReactNode }) 
         </header>
         {/* Room at the bottom on phones so the tab bar never covers content. */}
         <main className="flex-1 bg-muted/50 px-4 pb-28 pt-6 md:px-10 md:pb-10 md:pt-8">
-          <div className="mx-auto w-full max-w-6xl">{children}</div>
+          {children}
         </main>
       </div>
 
