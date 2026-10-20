@@ -183,6 +183,12 @@ export function TimeGrid({
                         </span>
                         <Avatars keys={e.assignees} crew={crew} />
                       </span>
+                      {/* Notes go last, so a short card clips them rather than the time. */}
+                      {e.description && (
+                        <span className={`mt-1 block whitespace-pre-line text-muted-foreground ${big ? "text-sm" : "text-[11px]"} line-clamp-3`}>
+                          {e.description}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}
@@ -253,6 +259,7 @@ export function Agenda({ from, days, entries, duties = [], crew }: { from: strin
                       <span className="block truncate text-xs text-muted-foreground">
                         {[e.location, describeRepeat(e.rule)].filter(Boolean).join(" · ")}
                       </span>
+                      {e.description && <span className="block line-clamp-2 text-xs text-muted-foreground">{e.description}</span>}
                     </span>
                     <Avatars keys={e.assignees} crew={crew} />
                   </Link>
