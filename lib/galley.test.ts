@@ -86,6 +86,10 @@ test("units read naturally for the amount", () => {
   assert.equal(unitFor(null, 2), null);
 });
 
+test("centimetres are a unit, so a piece of ginger reads right", () => {
+  assert.deepEqual(parseIngredient("5 cm piece fresh ginger, peeled"), { quantity: 5, unit: "cm", name: "piece fresh ginger", notes: "peeled" });
+});
+
 test("tags and times", () => {
   assert.deepEqual(parseTags("Quick, kid-friendly , quick,,"), ["quick", "kid-friendly"]);
   assert.equal(minutes(75), "1 hr 15 min");

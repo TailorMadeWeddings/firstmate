@@ -126,7 +126,10 @@ async function Recipes({ searchParams }: { searchParams: Promise<Search> }) {
         <>
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
-              <SearchBox placeholder="Search recipes or ingredients" label="Search recipes" />
+              {/* Its own row on a phone; beside the sort and layout buttons on anything wider. */}
+              <div className="flex w-full sm:w-auto sm:min-w-64 sm:flex-1">
+                <SearchBox placeholder="Search recipes or ingredients" label="Search recipes" />
+              </div>
               <nav aria-label="Sort" className="flex rounded-lg border bg-card p-0.5 text-sm">
                 {SORTS.map(([value, name]) => (
                   <Link
@@ -139,7 +142,7 @@ async function Recipes({ searchParams }: { searchParams: Promise<Search> }) {
                   </Link>
                 ))}
               </nav>
-              <nav aria-label="Layout" className="flex rounded-lg border bg-card p-0.5">
+              <nav aria-label="Layout" className="ml-auto flex rounded-lg border bg-card p-0.5 sm:ml-0">
                 {(
                   [
                     ["grid", LayoutGrid, "Grid"],
@@ -159,13 +162,14 @@ async function Recipes({ searchParams }: { searchParams: Promise<Search> }) {
               </nav>
             </div>
             {tags.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
+              // One row that scrolls sideways on a phone, rather than half a screen of tags.
+              <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
                 {tags.map((t) => (
                   <Link
                     key={t}
                     href={href({ tag: tag === t ? undefined : t })}
                     aria-current={tag === t ? "true" : undefined}
-                    className="rounded-full border bg-card px-3 py-1 text-sm hover:bg-muted aria-[current=true]:border-primary aria-[current=true]:bg-primary aria-[current=true]:text-primary-foreground"
+                    className="shrink-0 whitespace-nowrap rounded-full border bg-card px-3 py-1 text-sm hover:bg-muted aria-[current=true]:border-primary aria-[current=true]:bg-primary aria-[current=true]:text-primary-foreground"
                   >
                     {t}
                   </Link>

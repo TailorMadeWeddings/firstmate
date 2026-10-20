@@ -5,7 +5,9 @@ import { type RecipeCard, minutes } from "@/lib/galley";
 
 export function RecipeList({ recipes, layout }: { recipes: RecipeCard[]; layout: "grid" | "list" }) {
   return layout === "grid" ? (
-    <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    // grid-cols-1, not the default: with no columns set, a phone's single column
+    // grows to fit a photo's natural width (1600px) and the whole page with it.
+    <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {recipes.map((r) => (
         <li key={r.id}>
           <RecipeTile recipe={r} />
@@ -64,8 +66,8 @@ function RecipeTile({ recipe: r }: { recipe: RecipeCard }) {
         </span>
       )}
       <span className="flex flex-1 flex-col gap-2 p-4">
-        <span className="font-serif text-xl font-black leading-tight tracking-tight">{r.title}</span>
-        {r.description && <span className="line-clamp-2 text-sm text-muted-foreground">{r.description}</span>}
+        <span className="break-words font-serif text-xl font-black leading-tight tracking-tight">{r.title}</span>
+        {r.description && <span className="line-clamp-2 break-words text-sm text-muted-foreground">{r.description}</span>}
         <span className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-1">
           <span className="flex flex-wrap gap-1">
             {r.tags.slice(0, 3).map((t) => (
