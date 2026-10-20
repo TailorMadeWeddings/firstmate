@@ -1,6 +1,7 @@
 // First Mate as an MCP server, for Claude: the Logbook (calendar), Duties
 // (tasks) and the Galley (recipes, and meals planned on the Logbook).
-// Signs in with the person's key from Exercise: Authorization: Bearer fm_…
+// Signs in as a person: with a token from OAuth (Claude's connector, see
+// app/oauth) or their key from Exercise, as Authorization: Bearer fm_…
 // The secret key skips row-level security, so every tool keeps to the key
 // holder's household and checks what the policies would.
 import { NextResponse } from "next/server";
@@ -421,11 +422,19 @@ const TOOLS: Record<string, Tool<Ctx>> = {
 const reply = (status: number, body: object) => NextResponse.json(body, { status });
 
 export async function POST(request: Request) {
+  // Without a token, point the app at First Mate's sign-in.
+  const origin = new URL(request.url).origin;
+  const signIn = { "WWW-Authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"` };
+  const refuse = (error: string) => NextResponse.json({ error }, { status: 401, headers: signIn });
   const key = request.headers.get("authorization")?.match(/^Bearer\s+(fm_[\w-]{20,100})\s*$/i)?.[1];
-  if (!key) return reply(401, { error: "Send your key from Exercise as: Authorization: Bearer fm_…" });
+  if (!key) return refuse("Sign in to First Mate first.");
   const db = createAdminClient();
-  const { data: holder } = await db.from("health_keys").select("profile_id, household_id").eq("key_hash", hashKey(key)).maybeSingle();
-  if (!holder) return reply(401, { error: "That key isn't in use. Make a new one in Exercise." });
+  const [token, healthKey] = await Promise.all([
+    db.from("mcp_tokens").select("profile_id, household_id").eq("token_hash", hashKey(key)).maybeSingle(),
+    db.from("health_keys").select("profile_id, household_id").eq("key_hash", hashKey(key)).maybeSingle(),
+  ]);
+  const holder = token.data ?? healthKey.data;
+  if (!holder) return refuse("That sign-in isn't in use any more. Connect again.");
   const { data: member } = await db
     .from("household_members")
     .select("role")
