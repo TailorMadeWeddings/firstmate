@@ -58,7 +58,8 @@ async function Exercise({ searchParams }: { searchParams: Promise<Search> }) {
           <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-muted-foreground">Constitution</p>
           <h1 className="text-4xl">Exercise</h1>
           <p className="text-sm text-muted-foreground">
-            {self ? "Only you can see your exercise." : `Kept by the Captains.`} Scheduled sessions show on the Logbook by the activity&apos;s name.
+            {self ? "Only you can see your exercise." : "Kept by the Captains."}{" "}
+            Scheduled sessions show on the Logbook by the activity&apos;s name.
           </p>
         </div>
         <ConstitutionTabs current="exercise" fitness={member.role === "owner"} />
@@ -122,7 +123,7 @@ async function Exercise({ searchParams }: { searchParams: Promise<Search> }) {
 
       <section aria-labelledby="activities" className="flex flex-col gap-3">
         <h2 id="activities" className="font-serif text-2xl font-black">
-          {self ? "Your activities" : `${subject?.name ?? "Their"} activities`}
+          {self ? "Your activities" : subject ? `${subject.name}’s activities` : "Activities"}
         </h2>
         {activities.length === 0 && <p className="text-sm text-muted-foreground">None yet. Add one below: aikido, golf, the gym, swimming…</p>}
         <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
