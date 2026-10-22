@@ -322,7 +322,7 @@ test("payees: a confirmed choice covers the merchant, now and on later imports",
     await tx.query(imported("COLES 0746 WARATAH NS AUS Card xx1569 Value Date: 18/10/2026", -60));
     await tx.query(imported("Transfer to xx0689 CommBank app", -100));
     await tx.query(`select budget_save_transfer(null, '${ACCOUNT}', '${SAVINGS}', 100, '2026-10-20', 'Transfer to xx0689 CommBank app')`);
-    const pending = (await tx.query("select merchant, transactions, total::text, known from budget_pending order by merchant")).rows;
+    const pending = (await tx.query("select merchant, transactions, total::text, suggested_by from budget_pending order by merchant")).rows;
 
     const learned = (await tx.query<{ n: number }>(`select budget_learn('${HOME}', 'COLES WARATAH', '${CATEGORY}', true) as n`)).rows[0].n;
     await tx.query(`select budget_learn('${HOME}', 'TRANSFER TO XX0689', null, true)`);
@@ -332,14 +332,14 @@ test("payees: a confirmed choice covers the merchant, now and on later imports",
     await tx.query(imported("COLES 0746 WARATAH AU", -25));
     await tx.query(imported("Transfer to xx0689 CommBank app", -50));
     const later = (await tx.query("select merchant, category_id, transfer_id is not null as transfer, suggested_by from budget_transactions where amount in (-25, -50) order by amount")).rows;
-    const waiting = (await tx.query("select merchant, known, suggested from budget_pending order by merchant")).rows;
+    const waiting = (await tx.query("select merchant, suggested_by, suggestion from budget_pending order by merchant")).rows;
     const spent = (await tx.query("select sum(money_out)::text as out from budget_monthly_totals")).rows;
     return { pending, learned, after, later, waiting, spent };
   });
   assert.deepEqual(result.pending, [
-    { merchant: "COLES WARATAH", transactions: 2, total: "-100.00", known: false },
+    { merchant: "COLES WARATAH", transactions: 2, total: "-100.00", suggested_by: null },
     // The real two-sided transfer isn't waiting; only the imported one is.
-    { merchant: "TRANSFER TO XX0689", transactions: 1, total: "-100.00", known: false },
+    { merchant: "TRANSFER TO XX0689", transactions: 1, total: "-100.00", suggested_by: null },
   ]);
   assert.equal(result.learned, 2);
   assert.deepEqual(result.after, [
@@ -356,8 +356,8 @@ test("payees: a confirmed choice covers the merchant, now and on later imports",
     { merchant: "COLES WARATAH", category_id: CATEGORY, transfer: false, suggested_by: "payee" },
   ]);
   assert.deepEqual(result.waiting, [
-    { merchant: "COLES WARATAH", known: true, suggested: CATEGORY },
-    { merchant: "TRANSFER TO XX0689", known: true, suggested: null },
+    { merchant: "COLES WARATAH", suggested_by: "payee", suggestion: CATEGORY },
+    { merchant: "TRANSFER TO XX0689", suggested_by: "payee", suggestion: "transfer" },
   ]);
   // Groceries: 84.20 + 40 + 60 + 25. The own-account transfers aren't spending.
   assert.deepEqual(result.spent, [{ out: "209.20" }]);
@@ -420,4 +420,40 @@ test("payee spending: per payee, merged by name, without transfers or income", a
     const rows = await as(db, id, (tx) => tx.query("select * from budget_payee_spending('2026-01-01', '2026-12-31')"));
     assert.equal(rows.rows.length, 0);
   }
+});
+
+test("claude's suggestions wait for an owner, and teach nothing until confirmed", async () => {
+  const db = await setup();
+  const result = await as(db, OWNER, async (tx) => {
+    await tx.query(`insert into budget_transactions (household_id, account_id, date, amount, description) values
+      ('${HOME}', '${ACCOUNT}', '2026-10-01', -12, 'SQ *ELMAS ON CLYDE Hamilton Nort AU'),
+      ('${HOME}', '${ACCOUNT}', '2026-10-08', -14, 'SQ *ELMAS ON CLYDE Hamilton Nort AU'),
+      ('${HOME}', '${ACCOUNT}', '2026-10-09', -50, 'Transfer to xx2947 CommBank app'),
+      ('${HOME}', '${ACCOUNT}', '2026-10-10', -30, 'COLES 0746 WARATAH AU')`);
+    // The Ledger already knows Coles; Claude guessing otherwise changes nothing.
+    await tx.query(`select budget_learn('${HOME}', 'COLES WARATAH', '${CATEGORY}', false)`);
+    const n = async (sql: string) => (await tx.query<{ n: number }>(sql)).rows[0].n;
+    const elmas = await n(`select budget_suggest_for('${HOME}', 'ELMAS ON CLYDE HAMILTON NORT', '${CATEGORY}') as n`);
+    const own = await n(`select budget_suggest_for('${HOME}', 'TRANSFER TO XX2947', null) as n`);
+    const coles = await n(`select budget_suggest_for('${HOME}', 'COLES WARATAH', null) as n`);
+    const pending = (await tx.query("select merchant, transactions, suggested_by, suggestion from budget_pending order by merchant")).rows;
+    const remembered = await count(tx, "budget_payees");
+    // An owner confirms Claude's guess for the coffee: now it's remembered.
+    await tx.query(`select budget_learn('${HOME}', 'ELMAS ON CLYDE HAMILTON NORT', '${CATEGORY}', true)`);
+    const afterConfirm = await count(tx, "budget_payees");
+    return { elmas, own, coles, pending, remembered, afterConfirm };
+  });
+  assert.deepEqual([result.elmas, result.own, result.coles], [2, 1, 0]);
+  assert.deepEqual(result.pending, [
+    { merchant: "COLES WARATAH", transactions: 1, suggested_by: "payee", suggestion: CATEGORY },
+    { merchant: "ELMAS ON CLYDE HAMILTON NORT", transactions: 2, suggested_by: "claude", suggestion: CATEGORY },
+    { merchant: "TRANSFER TO XX2947", transactions: 1, suggested_by: "claude", suggestion: "transfer" },
+  ]);
+  assert.equal(result.remembered, 1, "only Coles, which an owner chose");
+  assert.equal(result.afterConfirm, 2);
+  // Another household's owner can't suggest into ours.
+  const theirs = await as(db, OTHER_OWNER, (tx) =>
+    tx.query<{ n: number }>(`select budget_suggest_for('${HOME}', 'WOOLWORTHS', null) as n`),
+  );
+  assert.equal(theirs.rows[0].n, 0);
 });

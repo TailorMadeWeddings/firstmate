@@ -19,8 +19,10 @@ type Pending = {
   first: string;
   last: string;
   example: string;
-  known: boolean;
-  suggested: string | null;
+  /** The Ledger's memory ("payee") or Claude's guess, waiting to be confirmed. */
+  suggested_by: "payee" | "claude" | null;
+  /** A category id, or "transfer" for the household's own accounts. */
+  suggestion: string | null;
 };
 
 export default function ReconcilePage() {
@@ -38,7 +40,7 @@ async function Reconcile() {
     loadCategories(),
     supabase
       .from("budget_pending")
-      .select("merchant, transactions, total, first, last, example, known, suggested")
+      .select("merchant, transactions, total, first, last, example, suggested_by, suggestion")
       .order("transactions", { ascending: false })
       .order("merchant")
       .returns<Pending[]>(),
@@ -46,8 +48,8 @@ async function Reconcile() {
   if (error) throw error;
   const choices = forEntry(categories, []);
   // Suggestions first: one tap each. Then new merchants, most transactions first.
-  const suggested = data.filter((p) => p.known);
-  const unknown = data.filter((p) => !p.known);
+  const suggested = data.filter((p) => p.suggestion);
+  const unknown = data.filter((p) => !p.suggestion);
   const waiting = data.reduce((n, p) => n + p.transactions, 0);
 
   return (
@@ -81,7 +83,12 @@ function Group({ title, rows, choices, all }: { title: string; rows: Pending[]; 
           <li key={p.merchant} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
             <div className="min-w-0 flex-1">
               <p className="flex justify-between gap-3">
-                <span className="truncate font-medium">{p.merchant}</span>
+                <span className="truncate font-medium">
+                  {p.merchant}
+                  {p.suggested_by === "claude" && (
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">Claude&apos;s guess</span>
+                  )}
+                </span>
                 <span className="tabular-nums">{money(p.total)}</span>
               </p>
               <p className="truncate text-xs text-muted-foreground">
@@ -92,7 +99,7 @@ function Group({ title, rows, choices, all }: { title: string; rows: Pending[]; 
               <NativeSelect
                 name="category_id"
                 aria-label={`Category for ${p.merchant}`}
-                defaultValue={p.known ? (p.suggested ?? "transfer") : ""}
+                defaultValue={p.suggestion ?? ""}
                 required
               >
                 <option value="" disabled>
@@ -107,8 +114,8 @@ function Group({ title, rows, choices, all }: { title: string; rows: Pending[]; 
                   </option>
                 ))}
               </NativeSelect>
-              <Button size="sm" variant={p.known ? "default" : "secondary"}>
-                {p.known ? "Confirm" : "Save"}
+              <Button size="sm" variant={p.suggestion ? "default" : "secondary"}>
+                {p.suggestion ? "Confirm" : "Save"}
               </Button>
             </ActionForm>
           </li>
