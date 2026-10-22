@@ -41,17 +41,32 @@ function done(error: { code?: string; message: string } | null, foreignKey?: str
 
 // ---------- accounts ----------
 
-export async function addAccount(_: Result, form: FormData): Promise<Result> {
-  const { owner, supabase } = await db();
+/** The validated columns an account form describes, or an error message. */
+function accountFrom(form: FormData): Record<string, unknown> | string {
   const name = text(form, "name");
   const type = text(form, "type");
   const opening = parseAmount(text(form, "opening_balance") || "0", true);
   if (!name) return "Give the account a name.";
   if (!ACCOUNT_TYPES.includes(type as (typeof ACCOUNT_TYPES)[number])) return "Pick an account type.";
   if (opening === null) return "Opening balance should look like 1250.00 (or -300 for a card).";
+  return { name, type, opening_balance: opening };
+}
+
+export async function addAccount(_: Result, form: FormData): Promise<Result> {
+  const { owner, supabase } = await db();
+  const row = accountFrom(form);
+  if (typeof row === "string") return row;
   const { error } = await supabase
     .from("budget_accounts")
-    .insert({ household_id: owner.householdId, name, type, opening_balance: opening });
+    .insert({ ...row, household_id: owner.householdId });
+  return done(error);
+}
+
+export async function updateAccount(id: string, _: Result, form: FormData): Promise<Result> {
+  const { supabase } = await db();
+  const row = accountFrom(form);
+  if (typeof row === "string") return row;
+  const { error } = await supabase.from("budget_accounts").update(row).eq("id", id);
   return done(error);
 }
 
