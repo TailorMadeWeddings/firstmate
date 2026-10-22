@@ -19,7 +19,7 @@ import {
 } from "@/lib/ledger";
 import { currentOwner } from "@/lib/players";
 import { createClient } from "@/lib/supabase/server";
-import { addAccount, addTransaction, importCsv, saveTransfer } from "./actions";
+import { addAccount, addTransaction, importCsv, saveTransfer, updateAccount } from "./actions";
 import {
   BillRow,
   BudgetBar,
@@ -153,11 +153,47 @@ async function LedgerHome({ searchParams }: { searchParams: Search }) {
         {accounts.length > 0 && (
           <ul className="divide-y rounded-xl border">
             {accounts.map((a) => (
-              <li key={a.id} className="flex justify-between gap-4 px-4 py-3">
-                <span>
-                  {a.name} <span className="text-sm text-muted-foreground">{a.type}</span>
-                </span>
-                <Amount value={balanceOf(a.id)} currency={a.currency} />
+              <li key={a.id}>
+                <details className="px-4 py-3">
+                  <summary className="flex cursor-pointer list-none items-baseline justify-between gap-4">
+                    <span>
+                      {a.name} <span className="text-sm text-muted-foreground">{a.type}</span>
+                    </span>
+                    <span className="flex items-baseline gap-3">
+                      <Amount value={balanceOf(a.id)} currency={a.currency} />
+                      <span className="text-xs text-muted-foreground">Edit</span>
+                    </span>
+                  </summary>
+                  <ActionForm
+                    action={updateAccount.bind(null, a.id)}
+                    reset={false}
+                    className="mt-3 grid gap-3 sm:grid-cols-4 sm:items-end"
+                  >
+                    <div className="grid gap-1">
+                      <Label htmlFor={`acct-name-${a.id}`}>Name</Label>
+                      <Input id={`acct-name-${a.id}`} name="name" defaultValue={a.name} required />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label htmlFor={`acct-type-${a.id}`}>Type</Label>
+                      <NativeSelect id={`acct-type-${a.id}`} name="type" defaultValue={a.type}>
+                        {ACCOUNT_TYPES.map((t) => (
+                          <option key={t}>{t}</option>
+                        ))}
+                      </NativeSelect>
+                    </div>
+                    <div className="grid gap-1">
+                      {/* The balance before the first transaction; the current one follows from it. */}
+                      <Label htmlFor={`acct-opening-${a.id}`}>Opening balance</Label>
+                      <Input
+                        id={`acct-opening-${a.id}`}
+                        name="opening_balance"
+                        inputMode="decimal"
+                        defaultValue={Number(a.opening_balance).toFixed(2)}
+                      />
+                    </div>
+                    <Button variant="secondary">Save</Button>
+                  </ActionForm>
+                </details>
               </li>
             ))}
             <li className="flex justify-between gap-4 px-4 py-3 font-semibold">
