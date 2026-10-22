@@ -1,6 +1,7 @@
 // First Mate as an MCP server, for Claude: the Logbook (calendar), Duties
 // (tasks), the Galley (recipes, and meals planned on the Logbook), Portraits
-// (photos and albums) and your own gym routines.
+// (photos and albums), your own gym routines and, for Owners, reconciling the
+// Ledger.
 // Signs in as a person: with a token from OAuth (Claude's connector, see
 // app/oauth) or their key from Exercise, as Authorization: Bearer fm_…
 // The secret key skips row-level security, so every tool keeps to the key
@@ -23,7 +24,9 @@ const INSTRUCTIONS =
   "To plan meals, find recipes with list_recipes (get_recipes has ingredients and steps), then put each meal on the Logbook with add_event and its recipe_id. " +
   "Portraits holds the family's photos: find_photos describes them (date, caption, who's in them, tags, albums) without the pictures themselves; tag_photos and the album tools sort them. " +
   "Routines are the signed-in person's own gym workouts, opened on their phone at the gym and logged there. " +
-  "For the weekly progression, read get_routines (its recent_logs show what was actually done), then update_routine.";
+  "For the weekly progression, read get_routines (its recent_logs show what was actually done), then update_routine. " +
+  "The Ledger is the household's money, for Owners only. To reconcile, read list_unreconciled (past_choices show how merchants were categorised before), " +
+  "then suggest_categories; an Owner confirms on the Ledger's Reconcile page.";
 
 // ---------- arguments ----------
 
@@ -93,6 +96,10 @@ function keysFor(names: unknown, everyone: { key: string; name: string }[]): str
 }
 
 const canDelete = (ctx: Ctx, createdBy: string) => ctx.owner || createdBy === ctx.me;
+
+function ledgerOwner(ctx: Ctx) {
+  if (!ctx.owner) throw new Problem("The Ledger is for the household's Owners only.");
+}
 
 // ---------- Portraits ----------
 
@@ -770,6 +777,98 @@ const TOOLS: Record<string, Tool<Ctx>> = {
       });
       if (error) throw error;
       return `Logged ${routine.name} on ${date}.`;
+    },
+  },
+
+  // ---------- the Ledger: Owners only, like the app ----------
+
+  list_unreconciled: {
+    description:
+      "Ledger (Owners only): merchants whose imported transactions nobody has categorised, most transactions first, " +
+      "with the household's categories and past_choices (how each merchant was categorised before) to go by. " +
+      "total is negative for money out. Merchants the Ledger already remembers aren't listed. " +
+      "A merchant you suggested earlier comes back with your_suggestion.",
+    input: { type: "object", properties: { limit: { type: "number", description: "Merchants to list, up to 200 (default 100)." } } },
+    run: async (args, ctx) => {
+      ledgerOwner(ctx);
+      const limit = Math.min(Math.max(Math.trunc(Number(args.limit) || 100), 1), 200);
+      type Waiting = { merchant: string; transactions: number; total: number; first: string; last: string; example: string; suggestion: string | null };
+      const [waiting, categories, payees] = await Promise.all([
+        ctx.db
+          .from("budget_pending")
+          .select("merchant, transactions, total, first, last, example, suggestion")
+          .eq("household_id", ctx.household)
+          .or("suggested_by.is.null,suggested_by.eq.claude")
+          .order("transactions", { ascending: false })
+          .order("merchant")
+          .limit(limit),
+        ctx.db.from("budget_categories").select("id, name, type, parent_category_id, archived_at").eq("household_id", ctx.household).order("name"),
+        ctx.db.from("budget_payees").select("merchant, category_id").eq("household_id", ctx.household).order("updated_at", { ascending: false }).limit(1000),
+      ]);
+      const all = rows<{ id: string; name: string; type: string; parent_category_id: string | null; archived_at: string | null }[]>(categories);
+      const name = (id: string | null) => {
+        if (!id || id === "transfer") return "transfer";
+        const c = all.find((x) => x.id === id);
+        const parent = all.find((x) => x.id === c?.parent_category_id);
+        return parent ? `${parent.name} › ${c?.name}` : (c?.name ?? "?");
+      };
+      return {
+        categories: all.filter((c) => !c.archived_at).map((c) => ({ id: c.id, name: name(c.id), type: c.type })),
+        transfer: "Use category_id \"transfer\" for money moved to or from the household's own accounts.",
+        past_choices: rows<{ merchant: string; category_id: string | null }[]>(payees).map((p) => ({ merchant: p.merchant, category: name(p.category_id) })),
+        waiting: rows<Waiting[]>(waiting).map(({ suggestion, ...w }) => ({ ...w, ...(suggestion ? { your_suggestion: name(suggestion) } : {}) })),
+      };
+    },
+  },
+
+  suggest_categories: {
+    description:
+      "Ledger (Owners only): suggests a category for merchants from list_unreconciled. category_id is an id from its categories, " +
+      "or \"transfer\" for money moved to or from the household's own accounts. Suggestions wait on the Ledger's Reconcile page " +
+      "for an Owner to confirm, and only their confirmations are remembered. Leave out merchants you aren't sure of.",
+    input: {
+      type: "object",
+      properties: {
+        suggestions: {
+          type: "array",
+          maxItems: 200,
+          items: { type: "object", properties: { merchant: { type: "string" }, category_id: { type: "string" } }, required: ["merchant", "category_id"] },
+        },
+      },
+      required: ["suggestions"],
+    },
+    run: async (args, ctx) => {
+      ledgerOwner(ctx);
+      const given = Array.isArray(args.suggestions) ? args.suggestions : [];
+      if (given.length === 0) throw new Problem("Give some suggestions, each a merchant and a category_id.");
+      if (given.length > 200) throw new Problem("200 merchants at a time, at most.");
+      const live = new Set(
+        rows<{ id: string }[]>(await ctx.db.from("budget_categories").select("id").eq("household_id", ctx.household).is("archived_at", null)).map((c) => c.id),
+      );
+      // Check them all before changing anything, so a bad one doesn't leave half done.
+      const checked = given.map((s: { merchant?: unknown; category_id?: unknown }) => {
+        const merchant = typeof s?.merchant === "string" ? s.merchant.trim() : "";
+        const category = String(s?.category_id ?? "");
+        if (!merchant) throw new Problem("Each suggestion needs the merchant, as list_unreconciled gives it.");
+        if (category !== "transfer" && !live.has(category)) {
+          throw new Problem(`${merchant}: category_id should be an id from list_unreconciled's categories, or "transfer".`);
+        }
+        return { merchant, category: category === "transfer" ? null : category };
+      });
+      let transactions = 0;
+      const notWaiting: string[] = [];
+      // ponytail: one round trip per merchant; fine for 200, batch it if lists grow.
+      for (const s of checked) {
+        const n = rows<number>(await ctx.db.rpc("budget_suggest_for", { p_household: ctx.household, p_merchant: s.merchant, p_category: s.category }));
+        transactions += n;
+        if (n === 0) notWaiting.push(s.merchant);
+      }
+      return {
+        suggested: checked.length - notWaiting.length,
+        transactions,
+        ...(notWaiting.length ? { not_waiting: notWaiting } : {}),
+        next: "An Owner confirms these on the Ledger's Reconcile page.",
+      };
     },
   },
 };
