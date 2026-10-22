@@ -494,3 +494,25 @@ export async function deleteTransfer(id: string): Promise<Result> {
   revalidatePath("/ledger", "layout");
   redirect("/ledger");
 }
+
+// ---------- payees ----------
+
+/**
+ * A payee's name, for every merchant in it. Giving two merchants the same
+ * name puts them together in the payees report; a blank name goes back to
+ * the bank's. Only merchants already reconciled are remembered.
+ */
+export async function renamePayee(merchants: string[], _: Result, form: FormData): Promise<Result> {
+  const { owner, supabase } = await db();
+  const name = optional(form, "name");
+  if (name && name.length > 80) return "Keep the name under 80 characters.";
+  const { data, error } = await supabase
+    .from("budget_payees")
+    .update({ name })
+    .eq("household_id", owner.householdId)
+    .in("merchant", merchants)
+    .select("merchant");
+  if (error) return done(error);
+  if (!data.length) return "Sort this payee in Reconcile first, then it can be renamed.";
+  return done(null);
+}

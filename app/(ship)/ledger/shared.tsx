@@ -3,10 +3,13 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { ActionForm } from "@/components/action-form";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
 import {
   type Category,
   UNITS,
+  addMonths,
   type MonthlyTotal,
+  type Period,
   type Transfer,
   type Unit,
   budgetStatus,
@@ -422,5 +425,44 @@ export function TransactionFields({
         </div>
       </details>
     </>
+  );
+}
+
+/**
+ * Presets and a custom month range, in one row above everything they scope.
+ * keep: other query parameters the custom range carries along.
+ */
+export function Filters({ period: p, keep = {} }: { period: Period; keep?: Record<string, string> }) {
+  const thisMonth = today().slice(0, 7);
+  const presets: [string, string, string][] = [
+    ["This month", thisMonth, thisMonth],
+    ["Last month", addMonths(thisMonth, -1), addMonths(thisMonth, -1)],
+    ["Last 3 months", addMonths(thisMonth, -2), thisMonth],
+    ["This year", `${thisMonth.slice(0, 4)}-01`, thisMonth],
+  ];
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      {presets.map(([name, from, to]) => {
+        const active = p.from === from && p.to === to;
+        return (
+          <Button key={name} asChild size="sm" variant={active ? "default" : "outline"}>
+            <Link href={`?${new URLSearchParams({ from, to })}`} aria-current={active ? "true" : undefined}>
+              {name}
+            </Link>
+          </Button>
+        );
+      })}
+      <form className="flex flex-wrap items-end gap-2">
+        <Input name="from" type="month" aria-label="From month" defaultValue={p.from} className="w-[9.5rem]" />
+        <span className="pb-2 text-sm text-muted-foreground">to</span>
+        <Input name="to" type="month" aria-label="To month" defaultValue={p.to} className="w-[9.5rem]" />
+        {Object.entries(keep).map(([name, value]) => (
+          <input key={name} type="hidden" name={name} value={value} />
+        ))}
+        <Button size="sm" variant="secondary">
+          Show
+        </Button>
+      </form>
+    </div>
   );
 }
