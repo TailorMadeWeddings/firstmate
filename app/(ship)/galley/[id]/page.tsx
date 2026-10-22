@@ -4,16 +4,16 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ActionForm } from "@/components/action-form";
+import { PhotoPicker } from "@/components/photo-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { minutes } from "@/lib/galley";
+import { PHOTO_BUCKET, minutes } from "@/lib/galley";
 import { dayKey } from "@/lib/logbook";
 import { currentMember } from "@/lib/players";
-import { deleteRecipe, fileRecipe, planMeal } from "../actions";
+import { deleteRecipe, fileRecipe, planMeal, setRecipePhoto } from "../actions";
 import { accessTo, loadCollections, loadRecipe } from "../data";
 import { Ingredients } from "./ingredients";
-import { PhotoPicker } from "./photo-picker";
 
 export const metadata: Metadata = { title: "Recipe · Galley · First Mate" };
 
@@ -65,7 +65,7 @@ async function RecipeView({ params }: { params: Promise<{ id: string }> }) {
           )}
           {canChange && (
             <div className="absolute bottom-3 left-3">
-              <PhotoPicker recipeId={recipe.id} hasPhoto={Boolean(recipe.photo)} />
+              <PhotoPicker bucket={PHOTO_BUCKET} folder={recipe.id} save={setRecipePhoto.bind(null, recipe.id)} hasPhoto={Boolean(recipe.photo)} />
             </div>
           )}
         </div>

@@ -18,6 +18,22 @@ const dayName = (day: string, style: "short" | "long" = "short") =>
 
 export const eventHref = (e: Entry) => `/logbook/events/${e.eventId}?at=${encodeURIComponent(e.originalStart.toISOString())}`;
 
+/** An event's card: a link to its page, or just the card when it's from someone's other calendar. */
+function EntryLink({ entry, className, style, children }: { entry: Entry; className: string; style?: React.CSSProperties; children: React.ReactNode }) {
+  if (entry.fromFeed) {
+    return (
+      <div className={className} style={style}>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <Link href={eventHref(entry)} className={className} style={style}>
+      {children}
+    </Link>
+  );
+}
+
 /** Initials in each person's colour; the colour is never the only clue. */
 export function Avatars({ keys, crew, size = "sm" }: { keys: string[]; crew: CrewMember[]; size?: "sm" | "lg" }) {
   const people = keys.map((k) => crew.find((c) => c.key === k)).filter((c) => c !== undefined);
@@ -120,14 +136,14 @@ export function TimeGrid({
                 {allDay.length > 0 && (
                   <div className="flex flex-col gap-1 px-1.5 pb-1.5">
                     {allDay.map((e) => (
-                      <Link
+                      <EntryLink
                         key={`${e.eventId}${e.originalStart.getTime()}`}
-                        href={eventHref(e)}
+                        entry={e}
                         className={`truncate rounded-md px-2 py-0.5 font-semibold ${big ? "text-base" : "text-xs"}`}
                         style={{ background: colourOf(e, crew), color: textOn(colourOf(e, crew)) }}
                       >
                         {e.title}
-                      </Link>
+                      </EntryLink>
                     ))}
                   </div>
                 )}
@@ -159,9 +175,9 @@ export function TimeGrid({
                   const from = Math.max(startH, FIRST_HOUR);
                   const colour = colourOf(e, crew);
                   return (
-                    <Link
+                    <EntryLink
                       key={`${e.eventId}${e.originalStart.getTime()}`}
-                      href={eventHref(e)}
+                      entry={e}
                       className="group absolute overflow-hidden rounded-xl border-l-[6px] p-2 shadow-sm transition hover:z-10 hover:shadow-md"
                       style={{
                         top: (from - FIRST_HOUR) * hour + 1,
@@ -189,7 +205,7 @@ export function TimeGrid({
                           {e.description}
                         </span>
                       )}
-                    </Link>
+                    </EntryLink>
                   );
                 })}
                 {day === today && now.h >= FIRST_HOUR && now.h < LAST_HOUR && (
@@ -246,7 +262,7 @@ export function Agenda({ from, days, entries, duties = [], crew }: { from: strin
               const colour = colourOf(e, crew);
               return (
                 <li key={`${e.eventId}${e.originalStart.getTime()}`}>
-                  <Link href={eventHref(e)} className="flex items-center gap-3 px-4 py-3 hover:bg-muted">
+                  <EntryLink entry={e} className={`flex items-center gap-3 px-4 py-3 ${e.fromFeed ? "" : "hover:bg-muted"}`}>
                     <span className="h-10 w-1.5 shrink-0 rounded-full" style={{ background: colour }} aria-hidden />
                     <span className="w-16 shrink-0 text-sm tabular-nums text-muted-foreground">
                       {e.allDay ? "All day" : time(e.start)}
@@ -262,7 +278,7 @@ export function Agenda({ from, days, entries, duties = [], crew }: { from: strin
                       {e.description && <span className="block line-clamp-2 text-xs text-muted-foreground">{e.description}</span>}
                     </span>
                     <Avatars keys={e.assignees} crew={crew} />
-                  </Link>
+                  </EntryLink>
                 </li>
               );
             })}

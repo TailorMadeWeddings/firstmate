@@ -3,13 +3,25 @@
 import { Camera, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { PHOTO_BUCKET } from "@/lib/galley";
 import { shrink } from "@/lib/photos";
 import { createClient } from "@/lib/supabase/client";
-import { setRecipePhoto } from "../actions";
 
-/** Add, change or remove a recipe's photo. Storage's own policies check it's yours to change. */
-export function PhotoPicker({ recipeId, hasPhoto }: { recipeId: string; hasPhoto: boolean }) {
+/**
+ * Add, change or remove a photo (a recipe's, a person's): uploaded to
+ * bucket under folder/, then save records it. Storage's own policies check
+ * it's yours to change.
+ */
+export function PhotoPicker({
+  bucket,
+  folder,
+  save,
+  hasPhoto,
+}: {
+  bucket: string;
+  folder: string;
+  save: (path: string | null) => Promise<string | null>;
+  hasPhoto: boolean;
+}) {
   const router = useRouter();
   const [busy, start] = useTransition();
   const [problem, setProblem] = useState<string | null>(null);
@@ -18,17 +30,17 @@ export function PhotoPicker({ recipeId, hasPhoto }: { recipeId: string; hasPhoto
     start(async () => {
       setProblem(null);
       const supabase = createClient();
-      const path = `${recipeId}/${crypto.randomUUID()}.jpg`;
+      const path = `${folder}/${crypto.randomUUID()}.jpg`;
       try {
-        const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, await shrink(file), { contentType: "image/jpeg" });
+        const { error } = await supabase.storage.from(bucket).upload(path, await shrink(file), { contentType: "image/jpeg" });
         if (error) throw error;
       } catch {
         setProblem("Couldn't upload that photo. Try a different one.");
         return;
       }
-      const failed = await setRecipePhoto(recipeId, path);
+      const failed = await save(path);
       if (failed) {
-        await supabase.storage.from(PHOTO_BUCKET).remove([path]);
+        await supabase.storage.from(bucket).remove([path]);
         setProblem(failed);
         return;
       }
@@ -37,7 +49,7 @@ export function PhotoPicker({ recipeId, hasPhoto }: { recipeId: string; hasPhoto
 
   const remove = () =>
     start(async () => {
-      setProblem((await setRecipePhoto(recipeId, null)) ?? null);
+      setProblem((await save(null)) ?? null);
       router.refresh();
     });
 

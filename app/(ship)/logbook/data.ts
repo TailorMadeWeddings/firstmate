@@ -5,6 +5,7 @@ import { type EventRow, type ExceptionRow, type Occurrence, crewColours, occurre
 import { currentCrew } from "@/lib/players";
 
 export { currentCrew };
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
 export type CrewMember = {
@@ -77,28 +78,40 @@ function age(born: string) {
   return years < 1 ? "baby" : `${years}`;
 }
 
-/** recipeId: the recipe, when the event is cooking a meal (KID-21). */
-export type Entry = Occurrence & { assignees: string[]; createdBy: string; recipeId: string | null };
+/**
+ * recipeId: the recipe, when the event is cooking a meal (KID-21).
+ * fromFeed: read in from someone's other calendar, so it has no page here.
+ */
+export type Entry = Occurrence & { assignees: string[]; createdBy: string; recipeId: string | null; fromFeed: boolean };
 
-/** Every occurrence overlapping [from, to), with who it's for. */
+/** Every occurrence overlapping [from, to), with who it's for, and the crew's other calendars alongside. */
 export async function loadEntries(from: Date, to: Date): Promise<Entry[]> {
   const supabase = await createClient();
-  const events = must<(EventRow & { created_by: string; recipe_id: string | null })[]>(
-    await supabase
-      .from("events")
-      .select("id, title, description, location, start_at, end_at, all_day, recurrence_rule, recurrence_ends_at, created_by, recipe_id")
-      .lt("start_at", to.toISOString())
-      .or(`recurrence_rule.not.is.null,end_at.gt.${from.toISOString()}`)
-      .or(`recurrence_ends_at.is.null,recurrence_ends_at.gt.${from.toISOString()}`),
-  );
+  const [own, feeds] = await Promise.all([logbookEntries(supabase, from, to), feedEntries(supabase, from, to)]);
+  return [...own, ...feeds].sort((a, b) => a.start.getTime() - b.start.getTime() || a.title.localeCompare(b.title));
+}
+
+/**
+ * The Logbook's own events overlapping [from, to). With the secret key
+ * (the calendar feed out), say which household: nothing else limits it.
+ */
+export async function logbookEntries(db: SupabaseClient, from: Date, to: Date, household?: string): Promise<Entry[]> {
+  let query = db
+    .from("events")
+    .select("id, title, description, location, start_at, end_at, all_day, recurrence_rule, recurrence_ends_at, created_by, recipe_id")
+    .lt("start_at", to.toISOString())
+    .or(`recurrence_rule.not.is.null,end_at.gt.${from.toISOString()}`)
+    .or(`recurrence_ends_at.is.null,recurrence_ends_at.gt.${from.toISOString()}`);
+  if (household) query = query.eq("household_id", household);
+  const events = must<(EventRow & { created_by: string; recipe_id: string | null })[]>(await query);
   if (events.length === 0) return [];
   const ids = events.map((e) => e.id);
   const [exceptions, assignees] = await Promise.all([
-    supabase
+    db
       .from("event_exceptions")
       .select("parent_event_id, original_start_at, is_cancelled, title, description, location, start_at, end_at")
       .in("parent_event_id", ids),
-    supabase.from("event_assignees").select("event_id, profile_id, dependent_id").in("event_id", ids),
+    db.from("event_assignees").select("event_id, profile_id, dependent_id").in("event_id", ids),
   ]);
   const who = new Map<string, string[]>();
   for (const a of must<{ event_id: string; profile_id: string | null; dependent_id: string | null }[]>(assignees)) {
@@ -111,5 +124,36 @@ export async function loadEntries(from: Date, to: Date): Promise<Entry[]> {
     assignees: who.get(o.eventId) ?? [],
     createdBy: byId.get(o.eventId)?.created_by ?? "",
     recipeId: byId.get(o.eventId)?.recipe_id ?? null,
+    fromFeed: false,
   }));
+}
+
+/** Events from the crew's other calendars (see feeds.ts), each marked as its owner's. */
+async function feedEntries(db: SupabaseClient, from: Date, to: Date): Promise<Entry[]> {
+  type Row = { id: string; profile_id: string; title: string; location: string | null; description: string | null; start_at: string; end_at: string; all_day: boolean };
+  const rows = must<Row[]>(
+    await db
+      .from("calendar_feed_events")
+      .select("id, profile_id, title, location, description, start_at, end_at, all_day")
+      .lt("start_at", to.toISOString())
+      .gt("end_at", from.toISOString()),
+  );
+  return rows.map((r) => {
+    const start = new Date(r.start_at);
+    return {
+      eventId: r.id,
+      originalStart: start,
+      start,
+      end: new Date(r.end_at),
+      allDay: r.all_day,
+      title: r.title,
+      description: r.description,
+      location: r.location,
+      rule: null,
+      assignees: [`p:${r.profile_id}`],
+      createdBy: r.profile_id,
+      recipeId: null,
+      fromFeed: true,
+    };
+  });
 }

@@ -103,6 +103,9 @@ export async function currentHealthOwner(): Promise<Member> {
  */
 export const currentVoyageMember = currentMedicalMember;
 
+/** Your profile is personal too: details, and calendars in and out. Crew only, on their own device. */
+export const currentProfileMember = currentMedicalMember;
+
 /** A Captain, on their own device: the books themselves. Officers go to their stories. */
 export async function currentVoyageCaptain(): Promise<Member> {
   const member = await currentVoyageMember();
