@@ -49,6 +49,7 @@ export const bookHref = (key: PersonKey) => `/voyage/${key.replace(":", "/")}`;
 export function homeOf(entry: Entry, people: Person[]) {
   if (!entry.profile_id && !entry.dependent_id) return { href: "/voyage/family", label: "The family", person: undefined };
   const person = people.find((p) => p.key === personKey(entry));
+  if (entry.template === "school-update") return { href: `/voyage/school?person=${encodeURIComponent(personKey(entry))}`, label: "School updates", person };
   const book = bookHref(personKey(entry));
   const href = template(entry.template).repeat === "year" && entry.period ? `${book}/age/${entry.period}` : book;
   return { href, label: person?.name ?? "Back", person };
@@ -156,17 +157,20 @@ export async function loadStory(id: string): Promise<Note | null> {
   return (data as Note | null) ?? null;
 }
 
-/** Photos on pages or stories (their own uploads, or picked from Portraits), by what they're on, oldest first, with short-lived links. */
-/** How many school updates each child's book has. */
-export async function countSchoolUpdates(): Promise<Map<PersonKey, number>> {
+/** Every child's school updates (without their text), newest first. */
+export async function loadSchoolUpdates(): Promise<Pick<Entry, "id" | "dependent_id" | "title" | "occurred_on">[]> {
   const supabase = await createClient();
-  const rows = must<{ dependent_id: string }[]>(await supabase.from("voyage_entries").select("dependent_id").eq("template", "school-update").not("dependent_id", "is", null));
-  const counts = new Map<PersonKey, number>();
-  for (const { dependent_id } of rows) counts.set(`d:${dependent_id}`, (counts.get(`d:${dependent_id}`) ?? 0) + 1);
-  return counts;
+  return must(
+    await supabase
+      .from("voyage_entries")
+      .select("id, dependent_id, title, occurred_on")
+      .eq("template", "school-update")
+      .order("occurred_on", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false }),
+  );
 }
 
-/** Photos on pages or stories, by what they're on, oldest first, with short-lived links. */
+/** Photos on pages or stories (their own uploads, or picked from Portraits), by what they're on, oldest first, with short-lived links. */
 export async function loadPhotos(column: "entry_id" | "note_id", ids: string[]): Promise<Map<string, Photo[]>> {
   const out = new Map<string, Photo[]>();
   if (ids.length === 0) return out;

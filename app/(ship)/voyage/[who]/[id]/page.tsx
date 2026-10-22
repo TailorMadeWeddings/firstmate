@@ -14,7 +14,6 @@ import { TrendChart } from "../../../constitution/trend-chart";
 import { setBirthday } from "../../actions";
 import { type Entry, type Person, bookHref, loadBook, loadMentions, loadPeople, loadStories } from "../../data";
 import { Chip, onDay, slotHref } from "../../parts";
-import { StoryparkImport } from "../../storypark-import";
 
 export const metadata: Metadata = { title: "Voyage · First Mate" };
 
@@ -48,6 +47,7 @@ async function Book({ params }: Props) {
   );
   const { weight, height } = growth(entries, person.born);
   const captains = people.filter((p) => p.kind === "profile");
+  const schoolUpdates = entries.filter((e) => e.template === "school-update").length;
 
   return (
     <>
@@ -114,10 +114,11 @@ async function Book({ params }: Props) {
       )}
 
       {person.kind === "dependent" && (
-        <div id="school-updates" className="flex scroll-mt-20 flex-col gap-3">
-          <Collection title="School updates" tkey="school-update" entries={entries} person={person.key} />
-          <StoryparkImport householdId={member.householdId} dependentId={person.id} name={person.name} />
-        </div>
+        <Contents title="School updates">
+          <Chip href={`/voyage/school?person=${encodeURIComponent(person.key)}`} filled={schoolUpdates > 0}>
+            {schoolUpdates ? `${schoolUpdates} from childcare and school` : "Import from Storypark"}
+          </Chip>
+        </Contents>
       )}
 
       <Collection title="Sport, music & other activities" tkey="activity" entries={entries} person={person.key} line={(e) => [e.fields.kind, e.fields.season, e.fields.level].filter(Boolean).join(" · ")} />
