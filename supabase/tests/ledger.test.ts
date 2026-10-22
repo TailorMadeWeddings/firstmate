@@ -286,3 +286,101 @@ test("ledger: constraints", async () => {
   await insert(`insert into budget_transactions (household_id, account_id, category_id, date, amount)
                 values ('${HOME}', '${ACCOUNT}', '${CATEGORY}', '2026-10-19', -5)`);
 });
+
+test("payees: the merchant is the description without the noise", async () => {
+  const db = await setup();
+  const cases = {
+    "COLES 0746 WARATAH NS AUS Card xx1569 Value Date: 24/07/2026": "COLES WARATAH",
+    "COLES 0746 WARATAH AU": "COLES WARATAH",
+    "SQ *ELMAS ON CLYDE Hamilton Nort AU": "ELMAS ON CLYDE HAMILTON NORT",
+    "NXT*Shortland Waters G Shortland NS AUS Card xx1569 Value Date: 21/04/2026": "SHORTLAND WATERS G SHORTLAND",
+    "BUNNINGS KOTARA 7122 KOTARA NSW AU": "BUNNINGS KOTARA KOTARA",
+    "NEBULA SUBSCRIPTION DENVER CO USA Card xx1569 USD 6.00 Value Date: 10/07/2026": "NEBULA SUBSCRIPTION DENVER CO",
+    "Transfer from xx0689 CommBank app": "TRANSFER FROM XX0689",
+    "Transfer To Pat Example CommBank App rent pt 1": "TRANSFER TO PAT EXAMPLE",
+    "Fast Transfer From SAM SAMPLE to PayID Phone lunch": "FAST TRANSFER FROM SAM SAMPLE",
+    "Fast Transfer From SAM SAMPLE dinner": "FAST TRANSFER FROM SAM SAMPLE",
+    "Direct Debit 468880 REVENUENSW Debt 000000029685056": "DIRECT DEBIT REVENUENSW DEBT",
+    "International Transaction Fee Value Date: 09/10/2026": "INTERNATIONAL TRANSACTION FEE",
+  };
+  for (const [description, merchant] of Object.entries(cases)) {
+    const r = await db.query<{ m: string }>("select budget_merchant($1) as m", [description]);
+    assert.equal(r.rows[0].m, merchant, description);
+  }
+  assert.equal((await db.query<{ m: null }>("select budget_merchant(null) as m")).rows[0].m, null);
+});
+
+test("payees: a confirmed choice covers the merchant, now and on later imports", async () => {
+  const db = await setup();
+  const SAVINGS = "20000000-0000-0000-0000-000000000002";
+  await db.exec(`insert into budget_accounts (id, household_id, name, type) values ('${SAVINGS}', '${HOME}', 'Savings', 'savings')`);
+  const imported = (description: string, amount: number) =>
+    `insert into budget_transactions (household_id, account_id, date, amount, description)
+     values ('${HOME}', '${ACCOUNT}', '2026-10-20', ${amount}, '${description}')`;
+  const result = await as(db, OWNER, async (tx) => {
+    await tx.query(imported("COLES 0746 WARATAH AU", -40));
+    await tx.query(imported("COLES 0746 WARATAH NS AUS Card xx1569 Value Date: 18/10/2026", -60));
+    await tx.query(imported("Transfer to xx0689 CommBank app", -100));
+    await tx.query(`select budget_save_transfer(null, '${ACCOUNT}', '${SAVINGS}', 100, '2026-10-20', 'Transfer to xx0689 CommBank app')`);
+    const pending = (await tx.query("select merchant, transactions, total::text, known from budget_pending order by merchant")).rows;
+
+    const learned = (await tx.query<{ n: number }>(`select budget_learn('${HOME}', 'COLES WARATAH', '${CATEGORY}', true) as n`)).rows[0].n;
+    await tx.query(`select budget_learn('${HOME}', 'TRANSFER TO XX0689', null, true)`);
+    const after = (await tx.query("select merchant, category_id, transfer_id is not null as transfer, suggested_by from budget_transactions where merchant is not null order by merchant, amount")).rows;
+
+    // A later import from a known merchant comes in suggested.
+    await tx.query(imported("COLES 0746 WARATAH AU", -25));
+    await tx.query(imported("Transfer to xx0689 CommBank app", -50));
+    const later = (await tx.query("select merchant, category_id, transfer_id is not null as transfer, suggested_by from budget_transactions where amount in (-25, -50) order by amount")).rows;
+    const waiting = (await tx.query("select merchant, known, suggested from budget_pending order by merchant")).rows;
+    const spent = (await tx.query("select sum(money_out)::text as out from budget_monthly_totals")).rows;
+    return { pending, learned, after, later, waiting, spent };
+  });
+  assert.deepEqual(result.pending, [
+    { merchant: "COLES WARATAH", transactions: 2, total: "-100.00", known: false },
+    // The real two-sided transfer isn't waiting; only the imported one is.
+    { merchant: "TRANSFER TO XX0689", transactions: 1, total: "-100.00", known: false },
+  ]);
+  assert.equal(result.learned, 2);
+  assert.deepEqual(result.after, [
+    { merchant: "COLES WARATAH", category_id: CATEGORY, transfer: false, suggested_by: null },
+    { merchant: "COLES WARATAH", category_id: CATEGORY, transfer: false, suggested_by: null },
+    // Both halves of the real transfer (same note), untouched, and the imported one.
+    { merchant: "TRANSFER TO XX0689", category_id: null, transfer: true, suggested_by: null },
+    { merchant: "TRANSFER TO XX0689", category_id: null, transfer: true, suggested_by: null },
+    { merchant: "TRANSFER TO XX0689", category_id: null, transfer: true, suggested_by: null },
+    { merchant: "WOOLWORTHS", category_id: CATEGORY, transfer: false, suggested_by: null },
+  ]);
+  assert.deepEqual(result.later, [
+    { merchant: "TRANSFER TO XX0689", category_id: null, transfer: true, suggested_by: "payee" },
+    { merchant: "COLES WARATAH", category_id: CATEGORY, transfer: false, suggested_by: "payee" },
+  ]);
+  assert.deepEqual(result.waiting, [
+    { merchant: "COLES WARATAH", known: true, suggested: CATEGORY },
+    { merchant: "TRANSFER TO XX0689", known: true, suggested: null },
+  ]);
+  // Groceries: 84.20 + 40 + 60 + 25. The own-account transfers aren't spending.
+  assert.deepEqual(result.spent, [{ out: "209.20" }]);
+});
+
+test("payees: owners only", async () => {
+  const db = await setup();
+  await db.exec(`
+    insert into budget_payees (household_id, merchant, category_id) values ('${HOME}', 'COLES WARATAH', '${CATEGORY}');
+    insert into budget_transactions (household_id, account_id, date, amount, description, created_by)
+      values ('${HOME}', '${ACCOUNT}', '2026-10-20', -9, 'ALDI STORES HAMILTON', '${OWNER}');
+  `);
+  assert.equal(await as(db, OWNER, (tx) => count(tx, "budget_payees")), 1);
+  assert.equal(await as(db, OWNER, (tx) => count(tx, "budget_pending")), 1);
+  for (const id of [TRUSTED, GUEST, OUTSIDER, OTHER_OWNER, null]) {
+    assert.equal(await as(db, id, (tx) => count(tx, "budget_payees")), 0);
+    assert.equal(await as(db, id, (tx) => count(tx, "budget_pending")), 0);
+  }
+  // Nobody else can teach our Ledger.
+  for (const id of [TRUSTED, OTHER_OWNER]) {
+    await assert.rejects(
+      as(db, id, (tx) => tx.query(`select budget_learn('${HOME}', 'ALDI STORES HAMILTON', null, true)`)),
+      /row-level security/,
+    );
+  }
+});
