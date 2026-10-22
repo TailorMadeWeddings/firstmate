@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   type Category,
   type MonthlyTotal,
@@ -15,13 +13,12 @@ import {
   pace,
   period,
   spendingByCategory,
-  today,
   totals,
   withChildren,
 } from "@/lib/ledger";
 import { currentOwner } from "@/lib/players";
 import { createClient } from "@/lib/supabase/server";
-import { type Transaction, loadAccounts, loadBills, loadCategories, loadGoals, loadLimits } from "../shared";
+import { Filters, type Transaction, loadAccounts, loadBills, loadCategories, loadGoals, loadLimits } from "../shared";
 
 export const metadata: Metadata = { title: "Reports · Ledger · First Mate" };
 
@@ -92,7 +89,7 @@ async function Reports({ searchParams }: { searchParams: Promise<Search> }) {
         <h1 className="text-2xl font-bold">Reports</h1>
       </header>
 
-      <Filters period={p} category={search.category} />
+      <Filters period={p} keep={search.category ? { category: search.category } : {}} />
 
       <section aria-label={`Totals for ${rangeName(p)}`} className="grid gap-3 sm:grid-cols-3">
         <StatTile label="Money in" value={now.moneyIn} was={before.moneyIn} upIsGood />
@@ -177,40 +174,6 @@ async function Reports({ searchParams }: { searchParams: Promise<Search> }) {
           </Link>
         </div>
       </section>
-    </div>
-  );
-}
-
-/** Presets and a custom month range, in one row above everything they scope. */
-function Filters({ period: p, category }: { period: Period; category?: string }) {
-  const thisMonth = today().slice(0, 7);
-  const presets: [string, string, string][] = [
-    ["This month", thisMonth, thisMonth],
-    ["Last month", addMonths(thisMonth, -1), addMonths(thisMonth, -1)],
-    ["Last 3 months", addMonths(thisMonth, -2), thisMonth],
-    ["This year", `${thisMonth.slice(0, 4)}-01`, thisMonth],
-  ];
-  return (
-    <div className="flex flex-wrap items-end gap-2">
-      {presets.map(([name, from, to]) => {
-        const active = p.from === from && p.to === to;
-        return (
-          <Button key={name} asChild size="sm" variant={active ? "default" : "outline"}>
-            <Link href={`?${new URLSearchParams({ from, to })}`} aria-current={active ? "true" : undefined}>
-              {name}
-            </Link>
-          </Button>
-        );
-      })}
-      <form className="flex flex-wrap items-end gap-2">
-        <Input name="from" type="month" aria-label="From month" defaultValue={p.from} className="w-[9.5rem]" />
-        <span className="pb-2 text-sm text-muted-foreground">to</span>
-        <Input name="to" type="month" aria-label="To month" defaultValue={p.to} className="w-[9.5rem]" />
-        {category && <input type="hidden" name="category" value={category} />}
-        <Button size="sm" variant="secondary">
-          Show
-        </Button>
-      </form>
     </div>
   );
 }

@@ -104,7 +104,7 @@ async function LedgerHome({ searchParams }: { searchParams: Search }) {
         <h1 className="text-3xl font-bold">Ledger</h1>
         {/* Wraps under the title on a phone rather than running off the side. */}
         <nav className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-          {["reconcile", "reports", "budgets", "bills", "goals", "categories"].map((page) => (
+          {["reconcile", "payees", "reports", "budgets", "bills", "goals", "categories"].map((page) => (
             <Link key={page} href={`/ledger/${page}`} className="capitalize hover:underline">
               {page}
             </Link>

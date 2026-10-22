@@ -384,3 +384,40 @@ test("payees: owners only", async () => {
     );
   }
 });
+
+test("payee spending: per payee, merged by name, without transfers or income", async () => {
+  const db = await setup();
+  const result = await as(db, OWNER, async (tx) => {
+    await tx.query(`insert into budget_transactions (household_id, account_id, category_id, date, amount, description) values
+      ('${HOME}', '${ACCOUNT}', '${CATEGORY}', '2026-08-03', -40, 'COLES 0746 WARATAH AU'),
+      ('${HOME}', '${ACCOUNT}', '${CATEGORY}', '2026-09-03', -60, 'COLES 0746 WARATAH AU'),
+      ('${HOME}', '${ACCOUNT}', '${CATEGORY}', '2026-09-20', -30, 'COLES 0820 KOTARA AU'),
+      ('${HOME}', '${ACCOUNT}', '${CATEGORY}', '2026-09-21', 10, 'COLES 0820 KOTARA AU'),
+      ('${HOME}', '${ACCOUNT}', null, '2026-09-05', 2000, 'Direct Credit 045801 CLIENT'),
+      ('${HOME}', '${ACCOUNT}', null, '2026-07-01', -999, 'RIPPIT GOLF Broadmeadow AU')`);
+    await tx.query(`insert into budget_transactions (household_id, account_id, date, amount, description, transfer_id)
+                    values ('${HOME}', '${ACCOUNT}', '2026-09-06', -500, 'Transfer to xx0689 CommBank app', gen_random_uuid())`);
+    await tx.query(`insert into budget_payees (household_id, merchant, category_id, name) values
+      ('${HOME}', 'COLES WARATAH', '${CATEGORY}', 'Coles'), ('${HOME}', 'COLES KOTARA', '${CATEGORY}', 'Coles')`);
+    return (
+      await tx.query(
+        "select payee, merchants, category_id, spent::text, transactions, months, first::text, last::text from budget_payee_spending('2026-08-01', '2026-10-31')",
+      )
+    ).rows;
+  });
+  // The golf is before the range; the client's payment is income; the transfer isn't spending.
+  assert.deepEqual(result, [
+    {
+      payee: "Coles", merchants: ["COLES KOTARA", "COLES WARATAH"], category_id: CATEGORY,
+      spent: "120.00", transactions: 4, months: 2, first: "2026-08-03", last: "2026-09-21",
+    },
+    {
+      payee: "WOOLWORTHS", merchants: ["WOOLWORTHS"], category_id: CATEGORY,
+      spent: "84.20", transactions: 1, months: 1, first: "2026-10-18", last: "2026-10-18",
+    },
+  ]);
+  for (const id of [TRUSTED, OTHER_OWNER, null]) {
+    const rows = await as(db, id, (tx) => tx.query("select * from budget_payee_spending('2026-01-01', '2026-12-31')"));
+    assert.equal(rows.rows.length, 0);
+  }
+});
