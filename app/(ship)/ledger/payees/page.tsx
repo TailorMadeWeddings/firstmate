@@ -53,7 +53,11 @@ async function Payees({ searchParams }: { searchParams: Promise<Search> }) {
   const occasional = rows.filter((r) => r.months < REGULAR_MONTHS);
   const selected = search.merchant ? rows.find((r) => r.merchants.includes(search.merchant!)) : undefined;
   const link = (r: Payee) => `?${new URLSearchParams({ from: p.from, to: p.to, merchant: r.merchants[0] })}#payee`;
-  const perYear = (r: Payee) => (Number(r.spent) / p.months.length) * 12;
+  // A year's cost from the months that have any spending in them, so a range
+  // reaching back before the first import doesn't water it down.
+  const earliest = rows.reduce((m, r) => (r.first < m ? r.first : m), p.to).slice(0, 7);
+  const covered = Math.max(p.months.filter((m) => m >= earliest).length, 1);
+  const perYear = (r: Payee) => (Number(r.spent) / covered) * 12;
 
   return (
     <div className="flex flex-col gap-8">
