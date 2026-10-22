@@ -4,6 +4,7 @@ import { type PersonKey, personColumns, personKey } from "@/lib/medical";
 import { PHOTO_BUCKET, type TemplateKey, template } from "@/lib/voyage";
 import { createClient } from "@/lib/supabase/server";
 import { type CrewMember, loadCrew } from "../logbook/data";
+import { PHOTO_BUCKET as PORTRAITS_BUCKET } from "../portraits/data";
 
 export type Person = CrewMember & { born: string | null };
 
@@ -155,19 +156,30 @@ export async function loadStory(id: string): Promise<Note | null> {
   return (data as Note | null) ?? null;
 }
 
-/** Photos on pages or stories, by what they're on, oldest first, with short-lived links. */
+/** Photos on pages or stories (their own uploads, or picked from Portraits), by what they're on, oldest first, with short-lived links. */
 export async function loadPhotos(column: "entry_id" | "note_id", ids: string[]): Promise<Map<string, Photo[]>> {
   const out = new Map<string, Photo[]>();
   if (ids.length === 0) return out;
   const supabase = await createClient();
-  type Row = { id: string; path: string; created_by: string; entry_id: string | null; note_id: string | null };
-  const rows = must<Row[]>(await supabase.from("voyage_photos").select("id, path, created_by, entry_id, note_id").in(column, ids).order("created_at"));
+  type Row = { id: string; path: string | null; created_by: string; entry_id: string | null; note_id: string | null; portrait_photos: { path: string } | null };
+  const rows = must<Row[]>(
+    await supabase.from("voyage_photos").select("id, path, created_by, entry_id, note_id, portrait_photos(path)").in(column, ids).order("created_at"),
+  );
   if (rows.length === 0) return out;
-  const { data } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrls(rows.map((r) => r.path), 60 * 60);
-  const urls = new Map((data ?? []).flatMap((d) => (d.path && d.signedUrl ? [[d.path, d.signedUrl] as const] : [])));
+  const sign = async (bucket: string, paths: string[]) => {
+    if (paths.length === 0) return [];
+    const { data } = await supabase.storage.from(bucket).createSignedUrls(paths, 60 * 60);
+    return (data ?? []).flatMap((d) => (d.path && d.signedUrl ? [[d.path, d.signedUrl] as const] : []));
+  };
+  const [own, portraits] = await Promise.all([
+    sign(PHOTO_BUCKET, rows.flatMap((r) => r.path ?? [])),
+    sign(PORTRAITS_BUCKET, rows.flatMap((r) => r.portrait_photos?.path ?? [])),
+  ]);
+  const urls = new Map([...own, ...portraits]);
   for (const r of rows) {
     const key = r[column]!;
-    out.set(key, [...(out.get(key) ?? []), { id: r.id, url: urls.get(r.path) ?? null, created_by: r.created_by }]);
+    const path = r.path ?? r.portrait_photos?.path;
+    out.set(key, [...(out.get(key) ?? []), { id: r.id, url: (path && urls.get(path)) ?? null, created_by: r.created_by }]);
   }
   return out;
 }

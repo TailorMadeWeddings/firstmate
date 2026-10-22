@@ -1,6 +1,6 @@
 // Pieces shared by the Voyage pages: a page's fields to fill in, a page read
 // back, the little slot chips in a book's contents, and photos.
-import { Trash2 } from "lucide-react";
+import { Images, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { ActionForm } from "@/components/action-form";
 import { Button } from "@/components/ui/button";
@@ -161,5 +161,14 @@ export function PhotoGrid({ photos, canDelete }: { photos: Photo[]; canDelete: (
         </li>
       ))}
     </ul>
+  );
+}
+
+/** Next to "Add photos": pick ones already in Portraits instead. */
+export function FromPortraits({ href }: { href: string }) {
+  return (
+    <Link href={href} className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-semibold hover:bg-muted">
+      <Images className="size-4" aria-hidden /> From Portraits
+    </Link>
   );
 }

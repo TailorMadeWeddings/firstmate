@@ -3,13 +3,14 @@ import { Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { ActionForm } from "@/components/action-form";
+import { PhotoAdder } from "@/components/photo-adder";
 import { Button } from "@/components/ui/button";
 import { personKey } from "@/lib/medical";
 import { currentVoyageMember } from "@/lib/players";
-import { deleteStory, saveStory } from "../actions";
+import { PHOTO_BUCKET } from "@/lib/voyage";
+import { addPhoto, deleteStory, saveStory } from "../actions";
 import { type Note, type Person, loadPeople, loadPhotos, loadStories } from "../data";
-import { PhotoGrid, onDay } from "../parts";
-import { PhotoAdder } from "../photo-adder";
+import { FromPortraits, PhotoGrid, onDay } from "../parts";
 import { StoryFields } from "./story-fields";
 
 export const metadata: Metadata = { title: "Stories · Voyage · First Mate" };
@@ -125,7 +126,12 @@ function Story({
       </header>
       <p className="whitespace-pre-wrap font-serif text-lg leading-relaxed">{story.body}</p>
       <PhotoGrid photos={photos} canDelete={canDelete} />
-      {mine && <PhotoAdder householdId={householdId} on={{ note_id: story.id }} />}
+      {mine && (
+        <div className="flex flex-wrap items-center gap-2">
+          <PhotoAdder bucket={PHOTO_BUCKET} householdId={householdId} save={addPhoto.bind(null, { note_id: story.id })} />
+          <FromPortraits href={`/voyage/pick?note=${story.id}${about ? `&person=${encodeURIComponent(about.key)}` : ""}`} />
+        </div>
+      )}
     </article>
   );
 }

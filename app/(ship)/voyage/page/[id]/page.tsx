@@ -4,15 +4,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ActionForm } from "@/components/action-form";
+import { PhotoAdder } from "@/components/photo-adder";
 import { Button } from "@/components/ui/button";
 import { dayKey } from "@/lib/logbook";
 import { type PersonKey, personKey } from "@/lib/medical";
 import { currentVoyageCaptain } from "@/lib/players";
-import { pageName, template } from "@/lib/voyage";
-import { saveSection } from "../../actions";
+import { PHOTO_BUCKET, pageName, template } from "@/lib/voyage";
+import { addPhoto, saveSection } from "../../actions";
 import { homeOf, loadEntry, loadPeople, loadPhotos, loadSections } from "../../data";
-import { PageView, PhotoGrid, area } from "../../parts";
-import { PhotoAdder } from "../../photo-adder";
+import { FromPortraits, PageView, PhotoGrid, area } from "../../parts";
 
 export const metadata: Metadata = { title: "Voyage · First Mate" };
 
@@ -65,7 +65,10 @@ async function Read({ params }: Props) {
 
       <section aria-label="Photos" className="flex flex-col gap-3">
         <PhotoGrid photos={photos.get(entry.id) ?? []} canDelete={() => true} />
-        <PhotoAdder householdId={member.householdId} on={{ entry_id: entry.id }} />
+        <div className="flex flex-wrap items-center gap-2">
+          <PhotoAdder bucket={PHOTO_BUCKET} householdId={member.householdId} save={addPhoto.bind(null, { entry_id: entry.id })} />
+          <FromPortraits href={`/voyage/pick?entry=${entry.id}${home.person ? `&person=${encodeURIComponent(home.person.key)}` : ""}`} />
+        </div>
       </section>
 
       {t.each && (

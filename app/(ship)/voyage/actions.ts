@@ -65,9 +65,14 @@ export async function savePage(entryId: string | null, key: string, person: Pers
   redirect(`/voyage/page/${data.id}`);
 }
 
-/** Removes the files behind some photos, before their rows go (storage checks the row is still there). */
-async function removeFiles(supabase: Awaited<ReturnType<typeof createClient>>, paths: string[]) {
-  if (paths.length) await supabase.storage.from(PHOTO_BUCKET).remove(paths);
+/**
+ * Removes the files behind some photos, before their rows go (storage checks
+ * the row is still there). Photos picked from Portraits have no file of their
+ * own (no path): they stay in Portraits.
+ */
+async function removeFiles(supabase: Awaited<ReturnType<typeof createClient>>, paths: (string | null)[]) {
+  const own = paths.filter((p) => p !== null);
+  if (own.length) await supabase.storage.from(PHOTO_BUCKET).remove(own);
 }
 
 export async function deletePage(entryId: string): Promise<Result> {
@@ -177,4 +182,22 @@ export async function setBirthday(profileId: string, _: Result, form: FormData):
   if (error) return failed(error);
   done();
   return null;
+}
+
+/** Photos picked from Portraits, shown on a page or a story; then back to it. */
+export async function addFromPortraits(on: { entry_id: string } | { note_id: string }, _: Result, form: FormData): Promise<Result> {
+  const member = await currentVoyageMember();
+  const picked = form.getAll("photos").map(String).filter((id) => /^[0-9a-f-]{36}$/.test(id));
+  if (picked.length === 0) return "Pick some photos first.";
+  const supabase = await createClient();
+  const [col, id] = "entry_id" in on ? (["entry_id", on.entry_id] as const) : (["note_id", on.note_id] as const);
+  const { data: there } = await supabase.from("voyage_photos").select("portrait_photo_id").eq(col, id).not("portrait_photo_id", "is", null);
+  const already = new Set((there ?? []).map((t) => t.portrait_photo_id));
+  const rows = picked.filter((p) => !already.has(p)).map((portrait_photo_id) => ({ ...on, household_id: member.householdId, portrait_photo_id }));
+  if (rows.length) {
+    const { error } = await supabase.from("voyage_photos").insert(rows);
+    if (error) return failed(error);
+  }
+  done();
+  redirect("entry_id" in on ? `/voyage/page/${on.entry_id}` : `/voyage/stories#${on.note_id}`);
 }

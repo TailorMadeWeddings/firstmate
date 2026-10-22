@@ -1,6 +1,6 @@
 // First Mate as an MCP server, for Claude: the Logbook (calendar), Duties
-// (tasks), the Galley (recipes, and meals planned on the Logbook) and your
-// own gym routines.
+// (tasks), the Galley (recipes, and meals planned on the Logbook), Portraits
+// (photos and albums) and your own gym routines.
 // Signs in as a person: with a token from OAuth (Claude's connector, see
 // app/oauth) or their key from Exercise, as Authorization: Bearer fm_…
 // The secret key skips row-level security, so every tool keeps to the key
@@ -8,19 +8,20 @@
 import { NextResponse } from "next/server";
 import { REPEATS, type Repeat, nextDue } from "@/lib/duties";
 import { DAY_SHORT, type RoutineExercise, exercisesFrom, weekdaysFrom } from "@/lib/exercise";
-import { findRecipes, ingredientLine, type RecipeCard } from "@/lib/galley";
+import { findRecipes, ingredientLine, parseTags, type RecipeCard } from "@/lib/galley";
 import { hashKey } from "@/lib/health";
 import { type EventRow, type ExceptionRow, WEEKDAYS, addDays, dayKey, describeRepeat, fromWall, occurrences, startOfDay, wallOf } from "@/lib/logbook";
 import { Problem, type Tool, answer } from "@/lib/mcp";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type Admin = ReturnType<typeof createAdminClient>;
-type Ctx = { db: Admin; me: string; household: string; owner: boolean };
+type Ctx = { db: Admin; me: string; household: string; owner: boolean; origin: string };
 
 const INSTRUCTIONS =
   "First Mate is the family's organiser. Dates are YYYY-MM-DD and times HH:MM, both in Sydney. " +
   "The Logbook is the calendar; Duties are the to-do list; the Galley is the cookbook. " +
   "To plan meals, find recipes with list_recipes (get_recipes has ingredients and steps), then put each meal on the Logbook with add_event and its recipe_id. " +
+  "Portraits holds the family's photos: find_photos describes them (date, caption, who's in them, tags, albums) without the pictures themselves; tag_photos and the album tools sort them. " +
   "Routines are the signed-in person's own gym workouts, opened on their phone at the gym and logged there. " +
   "For the weekly progression, read get_routines (its recent_logs show what was actually done), then update_routine.";
 
@@ -92,6 +93,27 @@ function keysFor(names: unknown, everyone: { key: string; name: string }[]): str
 }
 
 const canDelete = (ctx: Ctx, createdBy: string) => ctx.owner || createdBy === ctx.me;
+
+// ---------- Portraits ----------
+
+/** The photo ids given that are in this household, or a Problem naming the first that isn't. */
+async function ourPhotos(ctx: Ctx, given: unknown): Promise<string[]> {
+  const list = given === undefined || given === null ? [] : Array.isArray(given) ? given.map(String) : [String(given)];
+  if (list.some((p) => !UUID.test(p))) throw new Problem("photo_ids should be ids from find_photos.");
+  if (list.length > 500) throw new Problem("500 photos at a time, at most.");
+  if (list.length === 0) return [];
+  const found = new Set(rows<{ id: string }[]>(await ctx.db.from("portrait_photos").select("id").eq("household_id", ctx.household).in("id", list)).map((r) => r.id));
+  const missing = list.find((p) => !found.has(p));
+  if (missing) throw new Problem(`No photo ${missing} in Portraits. find_photos has them.`);
+  return [...found];
+}
+
+async function fileIn(ctx: Ctx, albumId: string, photoIds: string[]) {
+  if (photoIds.length === 0) return;
+  const links = photoIds.map((photo_id) => ({ album_id: albumId, photo_id, household_id: ctx.household }));
+  const { error } = await ctx.db.from("portrait_album_photos").upsert(links, { onConflict: "album_id,photo_id", ignoreDuplicates: true });
+  if (error) throw error;
+}
 
 // ---------- routines: always the signed-in person's own (exercise is private) ----------
 
@@ -497,6 +519,155 @@ const TOOLS: Record<string, Tool<Ctx>> = {
     },
   },
 
+  list_albums: {
+    description: "Portraits' photo albums, newest first, with how many photos each has.",
+    input: { type: "object", properties: {} },
+    run: async (_, ctx) => {
+      type Row = { id: string; title: string; taken_on: string | null; description: string | null; portrait_album_photos: { count: number }[] };
+      const found = rows<Row[]>(
+        await ctx.db
+          .from("portrait_albums")
+          .select("id, title, taken_on, description, portrait_album_photos(count)")
+          .eq("household_id", ctx.household)
+          .order("taken_on", { ascending: false, nullsFirst: false }),
+      );
+      return found.map(({ portrait_album_photos, ...a }) => ({ ...a, photos: portrait_album_photos[0]?.count ?? 0, link: `${ctx.origin}/portraits/${a.id}` }));
+    },
+  },
+
+  find_photos: {
+    description:
+      "Finds photos in Portraits, newest first: by who's in them, a tag, an album, or when they were taken. Returns each one's date, caption, people, tags, albums and a link to open it; not the picture itself.",
+    input: {
+      type: "object",
+      properties: {
+        person: { type: "string", description: "A crew member's or child's name." },
+        tag: { type: "string" },
+        album_id: { type: "string", description: "From list_albums." },
+        from: { type: "string", description: "Taken on or after, YYYY-MM-DD." },
+        to: { type: "string", description: "Taken on or before, YYYY-MM-DD." },
+        limit: { type: "integer", description: "At most this many (default 50, up to 200)." },
+      },
+    },
+    run: async (args, ctx) => {
+      const everyone = await crew(ctx);
+      const sets: string[][] = [];
+      if (args.person) {
+        const [key] = keysFor(args.person, everyone);
+        const col = key.startsWith("p:") ? "profile_id" : "dependent_id";
+        sets.push(rows<{ photo_id: string }[]>(await ctx.db.from("portrait_tags").select("photo_id").eq("household_id", ctx.household).eq(col, key.slice(2))).map((r) => r.photo_id));
+      }
+      const tag = str(args, "tag", 40)?.toLowerCase();
+      if (tag) sets.push(rows<{ photo_id: string }[]>(await ctx.db.from("portrait_tags").select("photo_id").eq("household_id", ctx.household).eq("word", tag)).map((r) => r.photo_id));
+      if (args.album_id) {
+        const albumId = id(args, "album_id");
+        sets.push(rows<{ photo_id: string }[]>(await ctx.db.from("portrait_album_photos").select("photo_id").eq("household_id", ctx.household).eq("album_id", albumId)).map((r) => r.photo_id));
+      }
+      const limit = Math.min(200, Math.max(1, Number(args.limit) || 50));
+      let q = ctx.db
+        .from("portrait_photos")
+        .select("id, taken_on, caption, portrait_tags(profile_id, dependent_id, word), portrait_album_photos(portrait_albums(title))")
+        .eq("household_id", ctx.household);
+      if (sets.length) {
+        const ids = sets.reduce((a, b) => a.filter((x) => b.includes(x)));
+        if (ids.length === 0) return [];
+        // ponytail: ids go in the address; fine for a family's tags, a join view if one tag covers thousands.
+        q = q.in("id", ids.slice(0, 1000));
+      }
+      const from = day(args, "from");
+      const to = day(args, "to");
+      if (from) q = q.gte("taken_on", from);
+      if (to) q = q.lte("taken_on", to);
+      type Row = {
+        id: string; taken_on: string; caption: string | null;
+        portrait_tags: { profile_id: string | null; dependent_id: string | null; word: string | null }[];
+        portrait_album_photos: { portrait_albums: { title: string } | null }[];
+      };
+      const names = new Map(everyone.map((c) => [c.key, c.name]));
+      return rows<Row[]>(await q.order("taken_on", { ascending: false }).order("created_at", { ascending: false }).limit(limit)).map((p) => ({
+        id: p.id,
+        taken_on: p.taken_on,
+        caption: p.caption,
+        people: p.portrait_tags.filter((t) => !t.word).map((t) => names.get(t.profile_id ? `p:${t.profile_id}` : `d:${t.dependent_id}`) ?? "someone"),
+        tags: p.portrait_tags.flatMap((t) => t.word ?? []),
+        albums: p.portrait_album_photos.flatMap((a) => a.portrait_albums?.title ?? []),
+        link: `${ctx.origin}/portraits/photo/${p.id}`,
+      }));
+    },
+  },
+
+  create_album: {
+    description: "Starts a Portraits album, optionally with photos already in it (photo_ids from find_photos).",
+    input: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        taken_on: { type: "string", description: "YYYY-MM-DD, when it's from." },
+        description: { type: "string" },
+        photo_ids: { type: "array", items: { type: "string" } },
+      },
+      required: ["title"],
+    },
+    run: async (args, ctx) => {
+      const title = str(args, "title", 200);
+      if (!title) throw new Problem("Give the album a name.");
+      const photos = await ourPhotos(ctx, args.photo_ids);
+      const { data: album, error } = await ctx.db
+        .from("portrait_albums")
+        .insert({ household_id: ctx.household, title, taken_on: day(args, "taken_on"), description: str(args, "description", 5000), created_by: ctx.me })
+        .select("id")
+        .single();
+      if (error) throw error;
+      await fileIn(ctx, album.id, photos);
+      return { added: album.id, title, photos: photos.length, link: `${ctx.origin}/portraits/${album.id}` };
+    },
+  },
+
+  add_to_album: {
+    description: "Puts photos (photo_ids from find_photos) into a Portraits album. They stay in any other albums too.",
+    input: { type: "object", properties: { album_id: { type: "string" }, photo_ids: { type: "array", items: { type: "string" } } }, required: ["album_id", "photo_ids"] },
+    run: async (args, ctx) => {
+      const albumId = id(args, "album_id");
+      const { data: album } = await ctx.db.from("portrait_albums").select("title").eq("id", albumId).eq("household_id", ctx.household).maybeSingle();
+      if (!album) throw new Problem("No album with that id. list_albums has them.");
+      const photos = await ourPhotos(ctx, args.photo_ids);
+      if (photos.length === 0) throw new Problem("Give some photo_ids from find_photos.");
+      await fileIn(ctx, albumId, photos);
+      return { album: album.title, added: photos.length };
+    },
+  },
+
+  tag_photos: {
+    description: "Tags photos (photo_ids from find_photos) with who's in them and with words. Adds to their tags; nothing is taken away. caption sets the caption, for one photo at a time.",
+    input: {
+      type: "object",
+      properties: { photo_ids: { type: "array", items: { type: "string" } }, people: whoField, tags: { type: "array", items: { type: "string" } }, caption: { type: "string" } },
+      required: ["photo_ids"],
+    },
+    run: async (args, ctx) => {
+      const photos = await ourPhotos(ctx, args.photo_ids);
+      if (photos.length === 0) throw new Problem("Give some photo_ids from find_photos.");
+      const people = [...new Set(keysFor(args.people, await crew(ctx)))];
+      const words = parseTags((Array.isArray(args.tags) ? args.tags : args.tags ? [args.tags] : []).join(","));
+      if (words.some((w) => w.length > 40)) throw new Problem("Keep each tag under 40 letters.");
+      const caption = str(args, "caption", 2000);
+      if (caption && photos.length > 1) throw new Problem("A caption is for one photo at a time.");
+      const tags = photos.flatMap((photo_id) => [
+        ...people.map((k) => ({ profile_id: k.startsWith("p:") ? k.slice(2) : null, dependent_id: k.startsWith("d:") ? k.slice(2) : null, word: null, photo_id, household_id: ctx.household })),
+        ...words.map((word) => ({ profile_id: null, dependent_id: null, word, photo_id, household_id: ctx.household })),
+      ]);
+      if (tags.length) {
+        const { error } = await ctx.db.from("portrait_tags").upsert(tags, { onConflict: "photo_id,profile_id,dependent_id,word", ignoreDuplicates: true });
+        if (error) throw error;
+      }
+      if (caption) {
+        const { error } = await ctx.db.from("portrait_photos").update({ caption }).eq("id", photos[0]);
+        if (error) throw error;
+      }
+      return { tagged: photos.length, people: people.length, tags: words, ...(caption ? { caption } : {}) };
+    },
+  },
+
   list_routines: {
     description: "Your gym routines (private to you): name, category, days and when each was last done. search matches name and category.",
     input: { type: "object", properties: { search: { type: "string" } } },
@@ -629,7 +800,7 @@ export async function POST(request: Request) {
     .neq("role", "guest")
     .maybeSingle();
   if (!member) return reply(403, { error: "You're no longer in the crew." });
-  const ctx: Ctx = { db, me: holder.profile_id, household: holder.household_id, owner: member.role === "owner" };
+  const ctx: Ctx = { db, me: holder.profile_id, household: holder.household_id, owner: member.role === "owner", origin };
 
   let body: unknown;
   try {
