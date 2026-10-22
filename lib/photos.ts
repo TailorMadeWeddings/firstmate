@@ -3,6 +3,9 @@
 
 const LONGEST_SIDE = 1600;
 
+/** Where people's own photos live, under <profile id>/. */
+export const PROFILE_PHOTO_BUCKET = "profile-photos";
+
 /** A phone photo, upright and shrunk to a sensible size, as a JPEG. */
 export async function shrink(file: File): Promise<Blob> {
   const image = await createImageBitmap(file, { imageOrientation: "from-image" });

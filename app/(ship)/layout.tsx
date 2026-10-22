@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Anchor } from "lucide-react";
+import { Anchor, CircleUserRound } from "lucide-react";
 import { Suspense } from "react";
 import { IdleLock } from "@/components/idle-lock";
 import { LogoutButton } from "@/components/logout-button";
@@ -40,6 +40,9 @@ export default function ShipLayout({ children }: { children: React.ReactNode }) 
             <Suspense>
               <KitchenStatus />
             </Suspense>
+            <Suspense>
+              <ProfileLink />
+            </Suspense>
             <ThemeSwitcher />
             <LogoutButton />
           </div>
@@ -66,6 +69,18 @@ async function Nav({ layout }: { layout: "sidebar" | "tabs" }) {
     { slug: "games", name: "Games", href: "/games" },
   ];
   return <ShipNav items={items} layout={layout} />;
+}
+
+/** Your profile, on your own device (not the kitchen screen, which anyone can walk up to). */
+async function ProfileLink() {
+  if (!(await canSeeConstitution(await currentMember()))) return null;
+  return (
+    <Button asChild variant="ghost" size="sm">
+      <Link href="/profile" aria-label="Your profile">
+        <CircleUserRound className="size-4" aria-hidden />
+      </Link>
+    </Button>
+  );
 }
 
 /** On the kitchen screen: a badge, and while the Ledger is unlocked a Lock button and the idle timer. */

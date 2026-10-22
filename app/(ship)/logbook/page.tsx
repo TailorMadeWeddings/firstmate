@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ChevronLeft, ChevronRight, ClipboardCheck, Plus } from "lucide-react";
 import { cookies } from "next/headers";
 import Link from "next/link";
+import { after } from "next/server";
 import { Suspense } from "react";
 import { LiveRefresh } from "@/components/live-refresh";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { kitchenState } from "@/lib/players";
 import { loadDuties } from "../duties/data";
 import { toggleLogbookDuties } from "./actions";
 import { currentCrew, loadCrew, loadEntries } from "./data";
+import { refreshFeeds } from "./feeds";
 import { Agenda, Avatars, TimeGrid } from "./views";
 
 export const metadata: Metadata = { title: "Logbook · First Mate" };
@@ -46,6 +48,8 @@ async function Logbook({ searchParams }: { searchParams: Promise<Search> }) {
   const last =
     chosen === "day" ? addDays(date, 1) : chosen === "week" ? addDays(monday, 7) : chosen === "agenda" ? addDays(date, AGENDA_DAYS) : [addDays(monday, 7), addDays(date, AGENDA_DAYS)].sort()[1];
   const showDuties = (await cookies()).get(LOGBOOK_DUTIES_COOKIE)?.value === "1";
+  // The crew's other calendars catch up once this page has gone out, ready for the next look.
+  after(() => refreshFeeds(member.householdId));
   const [crew, entries, { kitchen }, duties] = await Promise.all([
     loadCrew(member.householdId),
     loadEntries(startOfDay([first, date].sort()[0]), startOfDay(last)),

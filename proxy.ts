@@ -13,10 +13,10 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - images - .svg, .png, .jpg, .jpeg, .gif, .webp
-     * - api/health, api/mcp (the iPhone Shortcut and Claude sign in with a key, not a session)
+     * - api/health, api/mcp, api/calendar (the iPhone Shortcut, Claude and calendar apps sign in with a key, not a session)
      * - .well-known, oauth/register, oauth/token (how apps find and finish signing in)
      * Feel free to modify this pattern to include more paths.
      */
-    "/((?!_next/static|_next/image|favicon.ico|api/health|api/mcp|\\.well-known|oauth/register|oauth/token|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/health|api/mcp|api/calendar|\\.well-known|oauth/register|oauth/token|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
