@@ -6,6 +6,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { type PersonKey, isPersonKey, personColumns } from "@/lib/medical";
 import { currentVoyageCaptain, currentVoyageMember } from "@/lib/players";
+import { PORTRAITS_BUCKET, type UpdatePhoto, type UpdateStory, importedUpdates, knownPhotos, saveUpdate } from "@/lib/school-updates";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { PHOTO_BUCKET, type TemplateKey, fieldsFor, isTemplate, periodProblem, template } from "@/lib/voyage";
 import { bookHref } from "./data";
@@ -200,4 +202,37 @@ export async function addFromPortraits(on: { entry_id: string } | { note_id: str
   }
   done();
   redirect("entry_id" in on ? `/voyage/page/${on.entry_id}` : `/voyage/stories#${on.note_id}`);
+}
+
+/** The school updates already in a child's book (as updateKeys), so an import can skip them. */
+export async function importedSchoolUpdates(dependentId: string): Promise<string[]> {
+  await currentVoyageCaptain();
+  return [...(await importedUpdates(await createClient(), dependentId))];
+}
+
+/** Which of these photos (by SHA-256) Portraits already has, so they aren't uploaded again. */
+export async function knownSchoolPhotos(hashes: string[]): Promise<string[]> {
+  const member = await currentVoyageCaptain();
+  return [...(await knownPhotos(await createClient(), member.householdId, hashes.filter((h) => /^[0-9a-f]{64}$/.test(h)))).keys()];
+}
+
+/** One update from a Storypark export, with the photos the browser just uploaded to Portraits (see lib/school-updates.ts). */
+export async function saveSchoolUpdate(dependentId: string, story: UpdateStory, photos: UpdatePhoto[]): Promise<Result> {
+  const member = await currentVoyageCaptain();
+  const ours = new RegExp(`^${member.householdId}/[0-9a-f-]{36}\\.jpg$`);
+  if (!photos.every((p) => /^[0-9a-f]{64}$/.test(p.sha256) && (p.path === null || ours.test(p.path)))) return "Couldn't save those photos.";
+  if (story.date && !isDay(story.date)) return "That update's date doesn't make sense.";
+  const error = await saveUpdate(await createClient(), { household: member.householdId, dependent: dependentId }, story, photos);
+  if (!error) return null;
+  // Nobody can read a file whose row has gone, so the server removes them, as Portraits does.
+  const paths = photos.flatMap((p) => p.path ?? []);
+  if (paths.length) await createAdminClient().storage.from(PORTRAITS_BUCKET).remove(paths);
+  return failed(error);
+}
+
+/** After an import, so the book, the counts and Portraits catch up. */
+export async function refreshVoyage() {
+  await currentVoyageCaptain();
+  done();
+  revalidatePath("/portraits", "layout");
 }

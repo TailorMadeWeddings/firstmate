@@ -169,6 +169,8 @@ export const TEMPLATES = {
     bodyLabel: "About the year",
     blurb: "Add the school photo and report card as photos.",
   },
+  // What childcare and school sent home (Storypark, say), kept apart from what we wrote.
+  "school-update": { title: "School updates", repeat: "many", group: "school", titleLabel: "What", dateLabel: "When", fields: [], bodyLabel: "The update" },
   activity: {
     title: "Activity",
     repeat: "many",

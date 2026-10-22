@@ -14,6 +14,7 @@ import { TrendChart } from "../../../constitution/trend-chart";
 import { setBirthday } from "../../actions";
 import { type Entry, type Person, bookHref, loadBook, loadMentions, loadPeople, loadStories } from "../../data";
 import { Chip, onDay, slotHref } from "../../parts";
+import { StoryparkImport } from "../../storypark-import";
 
 export const metadata: Metadata = { title: "Voyage · First Mate" };
 
@@ -110,6 +111,13 @@ async function Book({ params }: Props) {
         <Contents title="School">
           {slots.school.map((n) => chip("school", n, `${schoolYear(n)} · ${kindergartenYear(person.born!) + n}`))}
         </Contents>
+      )}
+
+      {person.kind === "dependent" && (
+        <div id="school-updates" className="flex scroll-mt-20 flex-col gap-3">
+          <Collection title="School updates" tkey="school-update" entries={entries} person={person.key} />
+          <StoryparkImport householdId={member.householdId} dependentId={person.id} name={person.name} />
+        </div>
       )}
 
       <Collection title="Sport, music & other activities" tkey="activity" entries={entries} person={person.key} line={(e) => [e.fields.kind, e.fields.season, e.fields.level].filter(Boolean).join(" · ")} />
