@@ -157,6 +157,16 @@ export async function loadStory(id: string): Promise<Note | null> {
 }
 
 /** Photos on pages or stories (their own uploads, or picked from Portraits), by what they're on, oldest first, with short-lived links. */
+/** How many school updates each child's book has. */
+export async function countSchoolUpdates(): Promise<Map<PersonKey, number>> {
+  const supabase = await createClient();
+  const rows = must<{ dependent_id: string }[]>(await supabase.from("voyage_entries").select("dependent_id").eq("template", "school-update").not("dependent_id", "is", null));
+  const counts = new Map<PersonKey, number>();
+  for (const { dependent_id } of rows) counts.set(`d:${dependent_id}`, (counts.get(`d:${dependent_id}`) ?? 0) + 1);
+  return counts;
+}
+
+/** Photos on pages or stories, by what they're on, oldest first, with short-lived links. */
 export async function loadPhotos(column: "entry_id" | "note_id", ids: string[]): Promise<Map<string, Photo[]>> {
   const out = new Map<string, Photo[]>();
   if (ids.length === 0) return out;

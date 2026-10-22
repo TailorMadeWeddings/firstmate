@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import { BookHeart, Feather, Home } from "lucide-react";
+import { BookHeart, Feather, GraduationCap, Home } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { dayKey } from "@/lib/logbook";
 import { currentVoyageCaptain } from "@/lib/players";
 import { ageOn } from "@/lib/voyage";
-import { bookHref, loadFamilyPages, loadPeople, loadStories } from "./data";
+import { bookHref, countSchoolUpdates, loadFamilyPages, loadPeople, loadStories } from "./data";
 import { onDay } from "./parts";
 
 export const metadata: Metadata = { title: "Voyage · First Mate" };
@@ -28,7 +28,8 @@ export default function VoyagePage() {
 
 async function Books() {
   const member = await currentVoyageCaptain();
-  const [{ people }, family, stories] = await Promise.all([loadPeople(member.householdId), loadFamilyPages(), loadStories()]);
+  const [{ people }, family, stories, school] = await Promise.all([loadPeople(member.householdId), loadFamilyPages(), loadStories(), countSchoolUpdates()]);
+  const kids = people.filter((p) => p.kind === "dependent");
   const today = dayKey(new Date());
   const card = "flex items-center gap-4 rounded-2xl border bg-card p-5 hover:bg-muted";
   return (
@@ -59,6 +60,30 @@ async function Books() {
           ))}
         </ul>
       </section>
+
+      {kids.length > 0 && (
+        <section aria-labelledby="school" className="flex flex-col gap-3">
+          <div className="flex flex-col gap-0.5">
+            <h2 id="school" className="font-serif text-2xl font-black">
+              School updates
+            </h2>
+            <p className="text-sm text-muted-foreground">What childcare and school sent home, from Storypark and the like. Kept apart from the stories we write.</p>
+          </div>
+          <ul className="grid gap-3 sm:grid-cols-2">
+            {kids.map((p) => (
+              <li key={p.key}>
+                <Link href={`${bookHref(p.key)}#school-updates`} className={card}>
+                  <GraduationCap className="size-8 shrink-0" style={{ color: p.color }} aria-hidden />
+                  <span>
+                    <span className="block font-serif text-xl font-black">{p.name}</span>
+                    <span className="block text-sm text-muted-foreground">{school.has(p.key) ? `${school.get(p.key)} ${school.get(p.key) === 1 ? "update" : "updates"}` : "None yet"}</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section aria-labelledby="together" className="grid gap-3 sm:grid-cols-2">
         <h2 id="together" className="sr-only">
