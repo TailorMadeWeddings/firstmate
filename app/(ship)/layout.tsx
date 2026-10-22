@@ -10,6 +10,7 @@ import { IDLE_MINUTES } from "@/lib/kitchen";
 import { canSeeConstitution, canSeeLedger, currentMember, kitchenState } from "@/lib/players";
 import { visibleSections } from "@/lib/sections";
 import { lock } from "./helm/actions";
+import { Slideshow } from "./portraits/slideshow";
 
 /**
  * The shell from the AI Studio mock-up: an icon sidebar on desktop and the
@@ -83,12 +84,13 @@ async function ProfileLink() {
   );
 }
 
-/** On the kitchen screen: a badge, and while the Ledger is unlocked a Lock button and the idle timer. */
+/** On the kitchen screen: a badge, the photo slideshow when idle, and while the Ledger is unlocked a Lock button and the idle timer. */
 async function KitchenStatus() {
   const { kitchen, unlock } = await kitchenState(await currentMember());
   if (!kitchen) return null;
   return (
     <>
+      <Slideshow />
       <Link
         href="/helm"
         className="rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"

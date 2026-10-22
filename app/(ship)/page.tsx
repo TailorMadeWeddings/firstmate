@@ -6,6 +6,7 @@ import { dueLabel, personFor } from "@/lib/duties";
 import { isTrainingDay, programState } from "@/lib/exercise";
 import { TZ, addDays, dayKey, startOfDay } from "@/lib/logbook";
 import { canSeeConstitution, canSeeLedger, currentMember } from "@/lib/players";
+import { yearsAgo } from "@/lib/portraits";
 import { sectionIcons, visibleSections } from "@/lib/sections";
 import { createClient } from "@/lib/supabase/server";
 import { tickDaily, tickSlot } from "./constitution/exercise/actions";
@@ -13,6 +14,7 @@ import { loadActivities, loadDaily, loadPrograms, loadRoutines } from "./constit
 import { Tick } from "./constitution/exercise/tick";
 import { loadDuties } from "./duties/data";
 import { DutyRow } from "./duties/duty-row";
+import { loadOnThisDay } from "./portraits/data";
 import { loadCrew, loadEntries } from "./logbook/data";
 
 export default function Home() {
@@ -32,6 +34,9 @@ export default function Home() {
           <TrainingToday />
         </Suspense>
       </div>
+      <Suspense>
+        <OnThisDay />
+      </Suspense>
       <Suspense>
         <Sections />
       </Suspense>
@@ -207,6 +212,34 @@ async function TrainingToday() {
           <li key={d.id} className="flex items-center gap-3 py-2">
             <Tick done={d.done} label={`${d.name}: ${d.done ? "done" : "not done"}`} toggle={tickDaily.bind(null, d.id)} />
             <span className={d.done ? "text-muted-foreground line-through" : ""}>{d.name}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Portraits taken on this day in earlier years, if there are any. */
+async function OnThisDay() {
+  const member = await currentMember();
+  if (member.role === "guest") return null;
+  const today = dayKey(new Date());
+  const photos = (await loadOnThisDay(today)).filter((p) => p.url);
+  if (photos.length === 0) return null;
+  return (
+    <section aria-labelledby="on-this-day" className="flex flex-col gap-3 rounded-2xl border bg-card p-6 shadow-sm">
+      <h2 id="on-this-day" className="text-[11px] font-semibold uppercase tracking-[0.3em] text-muted-foreground">
+        On this day
+      </h2>
+      <ul className="flex gap-3 overflow-x-auto pb-1">
+        {photos.map((p) => (
+          <li key={p.id} className="shrink-0">
+            <Link href={`/portraits/photo/${p.id}`} className="flex w-40 flex-col gap-1.5">
+              {/* Private, signed links: next/image's optimiser can't fetch them anyway. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={p.url!} alt={p.caption ?? ""} loading="lazy" className="aspect-square w-full rounded-xl object-cover" />
+              <span className="text-sm font-medium">{yearsAgo(p.taken_on, today)}</span>
+            </Link>
           </li>
         ))}
       </ul>

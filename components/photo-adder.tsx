@@ -3,13 +3,18 @@
 import { ImagePlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { dayKey } from "@/lib/logbook";
 import { shrink } from "@/lib/photos";
+import { exifDate } from "@/lib/portraits";
 import { createClient } from "@/lib/supabase/client";
-import { PHOTO_BUCKET } from "@/lib/voyage";
-import { addPhoto } from "./actions";
 
-/** Add photos (several at once) to a page or a story. Storage's own policies check it's your household. */
-export function PhotoAdder({ householdId, on }: { householdId: string; on: { entry_id: string } | { note_id: string } }) {
+/**
+ * Add photos (several at once): each goes into the bucket under
+ * <household>/, then `save` records it with the day it was taken (from the
+ * camera's record in the file, else the file's date), returning a problem or null.
+ * Storage's own policies check it's your household. Used by Voyage and Portraits.
+ */
+export function PhotoAdder({ bucket, householdId, save }: { bucket: string; householdId: string; save: (path: string, takenOn: string | null) => Promise<string | null> }) {
   const router = useRouter();
   const [busy, start] = useTransition();
   const [progress, setProgress] = useState("");
@@ -23,15 +28,18 @@ export function PhotoAdder({ householdId, on }: { householdId: string; on: { ent
       for (const [i, file] of files.entries()) {
         setProgress(files.length > 1 ? ` ${i + 1} of ${files.length}` : "");
         const path = `${householdId}/${crypto.randomUUID()}.jpg`;
+        let takenOn: string | null = null;
         try {
-          const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, await shrink(file), { contentType: "image/jpeg" });
+          // Before shrinking: the shrunk copy loses the camera's record.
+          takenOn = exifDate(await file.slice(0, 256 * 1024).arrayBuffer()) ?? (file.lastModified ? dayKey(new Date(file.lastModified)) : null);
+          const { error } = await supabase.storage.from(bucket).upload(path, await shrink(file), { contentType: "image/jpeg" });
           if (error) throw error;
         } catch {
           failed++;
           continue;
         }
-        if (await addPhoto(on, path)) {
-          await supabase.storage.from(PHOTO_BUCKET).remove([path]);
+        if (await save(path, takenOn)) {
+          await supabase.storage.from(bucket).remove([path]);
           failed++;
         }
       }
