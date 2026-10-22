@@ -94,6 +94,8 @@ async function transactionFrom(
     amount: signed(amount, category.type),
     description: optional(form, "description"),
     notes: optional(form, "notes"),
+    // Chosen by a person, so no longer a suggestion.
+    suggested_by: null,
   };
 }
 
@@ -111,10 +113,43 @@ export async function updateTransaction(id: string, _: Result, form: FormData): 
   const { supabase } = await db();
   const row = await transactionFrom(supabase, form);
   if (typeof row === "string") return row;
-  const { error } = await supabase.from("budget_transactions").update(row).eq("id", id);
+  const { data: saved, error } = await supabase
+    .from("budget_transactions")
+    .update(row)
+    .eq("id", id)
+    .select("household_id, merchant")
+    .single<{ household_id: string; merchant: string | null }>();
   if (error) return done(error, "Pick an account.");
+  // Remember the merchant's category and suggest it for its other waiting transactions.
+  if (saved.merchant) {
+    const { error: learnError } = await supabase.rpc("budget_learn", {
+      p_household: saved.household_id,
+      p_merchant: saved.merchant,
+      p_category: row.category_id,
+      p_confirm: false,
+    });
+    if (learnError) return done(learnError);
+  }
   revalidatePath("/ledger", "layout");
   redirect("/ledger");
+}
+
+/**
+ * Every waiting transaction from one merchant, confirmed as a category or as
+ * money moved to or from the household's own accounts ("transfer"). The
+ * Ledger remembers the choice for the merchant's future imports.
+ */
+export async function reconcile(merchant: string, _: Result, form: FormData): Promise<Result> {
+  const { owner, supabase } = await db();
+  const choice = text(form, "category_id");
+  if (!choice) return "Pick a category.";
+  const { error } = await supabase.rpc("budget_learn", {
+    p_household: owner.householdId,
+    p_merchant: merchant,
+    p_category: choice === "transfer" ? null : choice,
+    p_confirm: true,
+  });
+  return done(error, "That category is gone. Reload and pick another.");
 }
 
 export async function deleteTransaction(id: string): Promise<Result> {

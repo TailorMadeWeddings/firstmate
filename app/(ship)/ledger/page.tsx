@@ -51,7 +51,7 @@ async function LedgerHome({ searchParams }: { searchParams: Search }) {
   const { imported, skipped } = await searchParams;
   const supabase = await createClient();
   const month = today().slice(0, 7);
-  const [accounts, categories, bills, goals, limits, monthRows, balances, recent] = await Promise.all([
+  const [accounts, categories, bills, goals, limits, monthRows, balances, recent, pending] = await Promise.all([
     loadAccounts(),
     loadCategories(),
     loadBills(),
@@ -65,9 +65,12 @@ async function LedgerHome({ searchParams }: { searchParams: Search }) {
       .order("date", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(50),
+    supabase.from("budget_pending").select("transactions"),
   ]);
   if (balances.error) throw balances.error;
   if (recent.error) throw recent.error;
+  if (pending.error) throw pending.error;
+  const waiting = pending.data.reduce((n, p) => n + p.transactions, 0);
   // Both halves of any transfer in the list, so each shows once as "from → to".
   const transferIds = [...new Set(recent.data.flatMap((t) => (t.transfer_id ? [t.transfer_id] : [])))];
   const { data: legs, error: legsError } = transferIds.length
@@ -80,7 +83,7 @@ async function LedgerHome({ searchParams }: { searchParams: Search }) {
   const transfers = transfersById(legs ?? []);
   const balanceOf = (id: string) => balances.data.find((b) => b.id === id)?.balance ?? 0;
   const transactions = recent.data as Transaction[];
-  const accountName = (id: string) => accounts.find((a) => a.id === id)?.name ?? "?";
+  const accountName = (id: string) => accounts.find((a) => a.id === id)?.name ?? "another account";
   const total = accounts.reduce((sum, a) => sum + Number(balanceOf(a.id)), 0);
   // Overdue first (bills are ordered by due date), then the next 30 days.
   const upcoming = bills.filter((b) => daysUntil(b.next_due) <= 30);
@@ -101,7 +104,7 @@ async function LedgerHome({ searchParams }: { searchParams: Search }) {
         <h1 className="text-3xl font-bold">Ledger</h1>
         {/* Wraps under the title on a phone rather than running off the side. */}
         <nav className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-          {["reports", "budgets", "bills", "goals", "categories"].map((page) => (
+          {["reconcile", "reports", "budgets", "bills", "goals", "categories"].map((page) => (
             <Link key={page} href={`/ledger/${page}`} className="capitalize hover:underline">
               {page}
             </Link>
@@ -114,6 +117,12 @@ async function LedgerHome({ searchParams }: { searchParams: Search }) {
           Imported {imported} transaction{imported === "1" ? "" : "s"}
           {Number(skipped) > 0 && `, skipped ${skipped} already in the Ledger`}.
         </p>
+      )}
+
+      {waiting > 0 && (
+        <Link href="/ledger/reconcile" className="rounded-xl border px-4 py-3 text-sm hover:bg-muted">
+          {waiting} transaction{waiting === 1 ? "" : "s"} to reconcile →
+        </Link>
       )}
 
       {budgets.length > 0 && (
