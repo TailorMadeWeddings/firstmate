@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { CalendarDays, FolderPlus, LayoutGrid, List, Plus, Share2, ShoppingBasket } from "lucide-react";
+import { CalendarDays, FolderPlus, LayoutGrid, List, Plus, Share2, ShoppingBasket, Tag } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { ActionForm } from "@/components/action-form";
@@ -71,6 +71,11 @@ async function Recipes({ searchParams }: { searchParams: Promise<Search> }) {
               <Button asChild variant="outline">
                 <Link href="/galley/shopping">
                   <ShoppingBasket aria-hidden /> Shopping list
+                </Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link href="/galley/prices">
+                  <Tag aria-hidden /> Prices
                 </Link>
               </Button>
             </>
