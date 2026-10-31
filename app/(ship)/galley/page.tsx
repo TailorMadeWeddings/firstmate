@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { FolderPlus, LayoutGrid, List, Plus, Share2 } from "lucide-react";
+import { FolderPlus, LayoutGrid, List, Plus, Share2, Tag } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { ActionForm } from "@/components/action-form";
@@ -60,13 +60,22 @@ async function Recipes({ searchParams }: { searchParams: Promise<Search> }) {
           <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-muted-foreground">Galley</p>
           <h1 className="text-4xl">The family cookbook</h1>
         </div>
-        {canAdd && (
-          <Button asChild>
-            <Link href={newRecipe}>
-              <Plus aria-hidden /> New recipe
-            </Link>
-          </Button>
-        )}
+        <div className="flex gap-2">
+          {member.role !== "guest" && (
+            <Button asChild variant="outline">
+              <Link href="/galley/prices">
+                <Tag aria-hidden /> Prices
+              </Link>
+            </Button>
+          )}
+          {canAdd && (
+            <Button asChild>
+              <Link href={newRecipe}>
+                <Plus aria-hidden /> New recipe
+              </Link>
+            </Button>
+          )}
+        </div>
       </header>
 
       {(collections.length > 0 || owner) && (
