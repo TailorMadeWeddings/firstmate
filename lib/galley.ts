@@ -132,6 +132,16 @@ export function ingredientLine(i: Ingredient): string {
   return [amount, unitFor(i.unit, i.quantity) ?? "", i.name].filter(Boolean).join(" ") + (i.notes ? `, ${i.notes}` : "");
 }
 
+/** An ingredient as a shopper reads it, for however many it's feeding: the amount and what, not "finely chopped". */
+export const shoppingLine = (i: Ingredient, from: number, to: number) =>
+  ingredientLine({ ...i, quantity: i.quantity === null ? null : scaled(Number(i.quantity), from, to), notes: null }).slice(0, 200);
+
+// ---------- the meal plan ----------
+
+export const MEALS = { lunch: "Lunch", dinner: "Dinner" } as const;
+export type MealSlot = keyof typeof MEALS;
+export type PlannedMeal = { day: string; meal: MealSlot; title: string; recipe_id: string | null };
+
 /** 75 → "1 hr 15 min" */
 export function minutes(total: number | null): string | null {
   if (!total) return null;

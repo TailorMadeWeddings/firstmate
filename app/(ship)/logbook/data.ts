@@ -2,6 +2,7 @@
 // Reads go through the signed-in user's client, so row-level security
 // decides what they see (crew only; Guests see nothing).
 import { type EventRow, type ExceptionRow, type Occurrence, crewColours, occurrences } from "@/lib/logbook";
+import type { PlannedMeal } from "@/lib/galley";
 import { currentCrew } from "@/lib/players";
 
 export { currentCrew };
@@ -156,4 +157,10 @@ async function feedEntries(db: SupabaseClient, from: Date, to: Date): Promise<En
       fromFeed: true,
     };
   });
+}
+
+/** The Galley's planned lunches and dinners, from one day up to (not including) another. */
+export async function loadMeals(from: string, to: string): Promise<PlannedMeal[]> {
+  const supabase = await createClient();
+  return must<PlannedMeal[]>(await supabase.from("meal_plans").select("day, meal, title, recipe_id").gte("day", from).lt("day", to));
 }

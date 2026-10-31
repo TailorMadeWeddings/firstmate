@@ -11,7 +11,7 @@ import { addDays, dayKey, startOfDay, weekStart } from "@/lib/logbook";
 import { kitchenState } from "@/lib/players";
 import { loadDuties } from "../duties/data";
 import { toggleLogbookDuties } from "./actions";
-import { currentCrew, loadCrew, loadEntries } from "./data";
+import { currentCrew, loadCrew, loadEntries, loadMeals } from "./data";
 import { refreshFeeds } from "./feeds";
 import { Agenda, Avatars, TimeGrid } from "./views";
 
@@ -21,7 +21,7 @@ type View = "week" | "day" | "agenda";
 type Search = { view?: string; date?: string };
 
 const AGENDA_DAYS = 30;
-const TABLES = ["events", "event_assignees", "event_exceptions"];
+const TABLES = ["events", "event_assignees", "event_exceptions", "meal_plans"];
 
 export default function LogbookPage({ searchParams }: { searchParams: Promise<Search> }) {
   return (
@@ -50,11 +50,12 @@ async function Logbook({ searchParams }: { searchParams: Promise<Search> }) {
   const showDuties = (await cookies()).get(LOGBOOK_DUTIES_COOKIE)?.value === "1";
   // The crew's other calendars catch up once this page has gone out, ready for the next look.
   after(() => refreshFeeds(member.householdId));
-  const [crew, entries, { kitchen }, duties] = await Promise.all([
+  const [crew, entries, { kitchen }, duties, meals] = await Promise.all([
     loadCrew(member.householdId),
     loadEntries(startOfDay([first, date].sort()[0]), startOfDay(last)),
     kitchenState(member),
     showDuties ? loadDuties().then((d) => d.open) : [],
+    loadMeals([first, date].sort()[0], last),
   ]);
 
   const step = chosen === "day" ? 1 : chosen === "agenda" ? AGENDA_DAYS : 7;
@@ -120,16 +121,16 @@ async function Logbook({ searchParams }: { searchParams: Promise<Search> }) {
         </Link>
       </div>
 
-      {chosen === "week" && <TimeGrid days={week} entries={entries} duties={duties} crew={crew} big={kitchen} />}
-      {chosen === "day" && <TimeGrid days={[date]} entries={entries} duties={duties} crew={crew} big={kitchen} />}
-      {chosen === "agenda" && <Agenda from={date} days={AGENDA_DAYS} entries={entries} duties={duties} crew={crew} />}
+      {chosen === "week" && <TimeGrid days={week} entries={entries} duties={duties} meals={meals} crew={crew} big={kitchen} />}
+      {chosen === "day" && <TimeGrid days={[date]} entries={entries} duties={duties} meals={meals} crew={crew} big={kitchen} />}
+      {chosen === "agenda" && <Agenda from={date} days={AGENDA_DAYS} entries={entries} duties={duties} meals={meals} crew={crew} />}
       {!chosen && (
         <>
           <div className="md:hidden">
-            <Agenda from={date} days={AGENDA_DAYS} entries={entries} duties={duties} crew={crew} />
+            <Agenda from={date} days={AGENDA_DAYS} entries={entries} duties={duties} meals={meals} crew={crew} />
           </div>
           <div className="hidden md:block">
-            <TimeGrid days={week} entries={entries} duties={duties} crew={crew} big={kitchen} />
+            <TimeGrid days={week} entries={entries} duties={duties} meals={meals} crew={crew} big={kitchen} />
           </div>
         </>
       )}
