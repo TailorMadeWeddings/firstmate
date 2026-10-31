@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ChefHat, ClipboardCheck, Plus } from "lucide-react";
 import { type Duty, dueLabel, dutiesOn, personFor } from "@/lib/duties";
+import { MEALS, type MealSlot, type PlannedMeal } from "@/lib/galley";
 import { TZ, addDays, dayKey, describeRepeat, lanes, startOfDay, textOn, wallOf } from "@/lib/logbook";
 import { DutyRow } from "../duties/duty-row";
 import type { CrewMember, Entry } from "./data";
@@ -60,6 +61,24 @@ function Meal({ big = false }: { big?: boolean }) {
   return <ChefHat className={`mr-1 inline align-[-0.15em] ${big ? "size-4" : "size-3.5"}`} aria-label="Meal:" />;
 }
 
+/** The day's planned lunch and dinner, from the Galley's meal plan. */
+function DayMeals({ day, meals, big = false, className = "" }: { day: string; meals: PlannedMeal[]; big?: boolean; className?: string }) {
+  const planned = (Object.keys(MEALS) as MealSlot[]).flatMap((slot) => meals.filter((m) => m.day === day && m.meal === slot));
+  if (planned.length === 0) return null;
+  return (
+    <ul className={`flex flex-col gap-0.5 ${big ? "text-base" : "text-xs"} ${className}`} aria-label="Meals">
+      {planned.map((m) => (
+        <li key={m.meal} className="flex min-w-0 items-baseline gap-1.5">
+          <span className="shrink-0 font-semibold uppercase tracking-wider text-muted-foreground">{MEALS[m.meal]}</span>
+          <Link href={m.recipe_id ? `/galley/${m.recipe_id}` : "/galley/meals"} className="truncate font-semibold hover:underline">
+            {m.title}
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** The first assignee's colour marks the event; no one assigned is neutral ink. */
 const colourOf = (e: Entry, crew: CrewMember[]) => crew.find((c) => c.key === e.assignees[0])?.color ?? "#6b645d";
 
@@ -68,6 +87,7 @@ export function TimeGrid({
   days,
   entries,
   duties = [],
+  meals = [],
   crew,
   big = false,
 }: {
@@ -75,6 +95,8 @@ export function TimeGrid({
   entries: Entry[];
   /** Open duties, shown on the day they're due (shown only when the Duties toggle is on). */
   duties?: Duty[];
+  /** Planned lunches and dinners, shown at the top of their day. */
+  meals?: PlannedMeal[];
   crew: CrewMember[];
   big?: boolean;
 }) {
@@ -117,6 +139,7 @@ export function TimeGrid({
                     <Plus className="size-4" aria-hidden />
                   </Link>
                 </div>
+                <DayMeals day={day} meals={meals} big={big} className="px-2 pb-2" />
                 {dayDuties.length > 0 && (
                   <ul className="flex flex-col gap-1 px-1.5 pb-1.5" aria-label="Duties">
                     {dayDuties.map((d) => (
@@ -224,15 +247,30 @@ export function TimeGrid({
 }
 
 /** Upcoming events as a list, grouped by day: the phone's view. */
-export function Agenda({ from, days, entries, duties = [], crew }: { from: string; days: number; entries: Entry[]; duties?: Duty[]; crew: CrewMember[] }) {
+export function Agenda({
+  from,
+  days,
+  entries,
+  duties = [],
+  meals = [],
+  crew,
+}: {
+  from: string;
+  days: number;
+  entries: Entry[];
+  duties?: Duty[];
+  meals?: PlannedMeal[];
+  crew: CrewMember[];
+}) {
   const today = dayKey(new Date());
   const list = Array.from({ length: days }, (_, i) => addDays(from, i))
     .map((day) => ({
       day,
       items: entries.filter((e) => (e.allDay ? dayKey(e.start) <= day && day < dayKey(e.end) : dayKey(e.start) === day)),
       duties: dutiesOn(day, duties, today),
+      meals: meals.some((m) => m.day === day),
     }))
-    .filter((d) => d.items.length + d.duties.length > 0);
+    .filter((d) => d.items.length + d.duties.length > 0 || d.meals);
 
   if (list.length === 0) {
     return (
@@ -257,35 +295,38 @@ export function Agenda({ from, days, entries, duties = [], crew }: { from: strin
               {new Date(`${day}T00:00:00Z`).toLocaleDateString("en-AU", { day: "numeric", month: "long", timeZone: "UTC" })}
             </span>
           </h2>
-          <ul className="divide-y overflow-hidden rounded-2xl border bg-card">
-            {items.map((e) => {
-              const colour = colourOf(e, crew);
-              return (
-                <li key={`${e.eventId}${e.originalStart.getTime()}`}>
-                  <EntryLink entry={e} className={`flex items-center gap-3 px-4 py-3 ${e.fromFeed ? "" : "hover:bg-muted"}`}>
-                    <span className="h-10 w-1.5 shrink-0 rounded-full" style={{ background: colour }} aria-hidden />
-                    <span className="w-16 shrink-0 text-sm tabular-nums text-muted-foreground">
-                      {e.allDay ? "All day" : time(e.start)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-semibold">
-                        {e.recipeId && <Meal />}
-                        {e.title}
+          <DayMeals day={day} meals={meals} className="text-sm" />
+          {(items.length > 0 || dayDuties.length > 0) && (
+            <ul className="divide-y overflow-hidden rounded-2xl border bg-card">
+              {items.map((e) => {
+                const colour = colourOf(e, crew);
+                return (
+                  <li key={`${e.eventId}${e.originalStart.getTime()}`}>
+                    <EntryLink entry={e} className={`flex items-center gap-3 px-4 py-3 ${e.fromFeed ? "" : "hover:bg-muted"}`}>
+                      <span className="h-10 w-1.5 shrink-0 rounded-full" style={{ background: colour }} aria-hidden />
+                      <span className="w-16 shrink-0 text-sm tabular-nums text-muted-foreground">
+                        {e.allDay ? "All day" : time(e.start)}
                       </span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {[e.location, describeRepeat(e.rule)].filter(Boolean).join(" · ")}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-semibold">
+                          {e.recipeId && <Meal />}
+                          {e.title}
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {[e.location, describeRepeat(e.rule)].filter(Boolean).join(" · ")}
+                        </span>
+                        {e.description && <span className="block line-clamp-2 text-xs text-muted-foreground">{e.description}</span>}
                       </span>
-                      {e.description && <span className="block line-clamp-2 text-xs text-muted-foreground">{e.description}</span>}
-                    </span>
-                    <Avatars keys={e.assignees} crew={crew} />
-                  </EntryLink>
-                </li>
-              );
-            })}
-            {dayDuties.map((d) => (
-              <DutyRow key={d.id} duty={d} due={d.due_on! < day ? dueLabel(d.due_on!, today) : null} overdue={d.due_on! < today} person={personFor(d, crew)} />
-            ))}
-          </ul>
+                      <Avatars keys={e.assignees} crew={crew} />
+                    </EntryLink>
+                  </li>
+                );
+              })}
+              {dayDuties.map((d) => (
+                <DutyRow key={d.id} duty={d} due={d.due_on! < day ? dueLabel(d.due_on!, today) : null} overdue={d.due_on! < today} person={personFor(d, crew)} />
+              ))}
+            </ul>
+          )}
         </li>
       ))}
     </ol>

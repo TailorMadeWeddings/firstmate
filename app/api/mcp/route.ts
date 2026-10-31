@@ -9,7 +9,7 @@
 import { NextResponse } from "next/server";
 import { REPEATS, type Repeat, nextDue } from "@/lib/duties";
 import { DAY_SHORT, type RoutineExercise, exercisesFrom, weekdaysFrom } from "@/lib/exercise";
-import { findRecipes, ingredientLine, parseTags, type RecipeCard } from "@/lib/galley";
+import { MEALS, type MealSlot, type PlannedMeal, findRecipes, ingredientLine, parseIngredients, parseSteps, parseTags, type RecipeCard, shoppingLine } from "@/lib/galley";
 import { hashKey } from "@/lib/health";
 import { type EventRow, type ExceptionRow, WEEKDAYS, addDays, dayKey, describeRepeat, fromWall, occurrences, startOfDay, wallOf } from "@/lib/logbook";
 import { Problem, type Tool, answer } from "@/lib/mcp";
@@ -21,7 +21,7 @@ type Ctx = { db: Admin; me: string; household: string; owner: boolean; origin: s
 const INSTRUCTIONS =
   "First Mate is the family's organiser. Dates are YYYY-MM-DD and times HH:MM, both in Sydney. " +
   "The Logbook is the calendar; Duties are the to-do list; the Galley is the cookbook. " +
-  "To plan meals, find recipes with list_recipes (get_recipes has ingredients and steps), then put each meal on the Logbook with add_event and its recipe_id. " +
+  "To plan meals, find recipes with list_recipes (get_recipes has ingredients and steps), then plan_meals puts them in the Galley's meal plan as lunch or dinner (they show at the top of each day on the Logbook); list_meals shows what's planned. add_to_shopping_list adds a recipe's ingredients, or anything else, to the shared shopping list. add_recipe puts a new recipe in the Galley. " +
   "Portraits holds the family's photos: find_photos describes them (date, caption, who's in them, tags, albums) without the pictures themselves; tag_photos and the album tools sort them. " +
   "Routines are the signed-in person's own gym workouts, opened on their phone at the gym and logged there. " +
   "For the weekly progression, read get_routines (its recent_logs show what was actually done), then update_routine. " +
@@ -53,6 +53,25 @@ const id = (args: Record<string, unknown>, key: string) => {
   if (!v) throw new Problem(`Say which ${key}.`);
   return v;
 };
+
+/** A list of short texts, one per line (ingredients, steps, tags). */
+function lines(args: Record<string, unknown>, key: string, most = 100): string[] {
+  const v = args[key];
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || v.some((l) => typeof l !== "string")) throw new Problem(`${key} should be a list of text.`);
+  if (v.length > most) throw new Problem(`${most} ${key} at most.`);
+  if (v.some((l: string) => l.length > 1000)) throw new Problem(`Each of ${key} should be under 1000 characters.`);
+  // Newlines inside one item would split it in two when parsed.
+  return v.map((l: string) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+}
+
+/** A whole number in range, or null when left out. */
+function whole(args: Record<string, unknown>, key: string, min: number, max: number): number | null {
+  const v = args[key];
+  if (v === undefined || v === null) return null;
+  if (!(Number.isInteger(v) && (v as number) >= min && (v as number) <= max)) throw new Problem(`${key} should be a whole number, ${min} to ${max}.`);
+  return v as number;
+}
 
 /** Rows from a query, or a thrown error (logged, not shown to the model). */
 function rows<T>({ data, error }: { data: unknown; error: unknown }): T {
@@ -523,6 +542,181 @@ const TOOLS: Record<string, Tool<Ctx>> = {
         ingredients: recipe_ingredients.sort(byPosition).map(ingredientLine),
         method: recipe_steps.sort(byPosition).map((s) => s.instruction),
       }));
+    },
+  },
+
+  add_recipe: {
+    description:
+      "Adds a recipe to the Galley, as the signed-in person. Ingredients are one per item, written as a cook would (\"2 cups plain flour, sifted\"): the amount and unit are read off the front so they scale with servings. Method steps are one per item; times in them (\"simmer 20 minutes\") become cooking-mode timers.",
+    input: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        description: { type: "string", description: "A line or two about it." },
+        source_url: { type: "string", description: "Where it came from. https:// only." },
+        servings: { type: "integer" },
+        prep_minutes: { type: "integer" },
+        cook_minutes: { type: "integer" },
+        ingredients: { type: "array", items: { type: "string" } },
+        method: { type: "array", items: { type: "string" } },
+        tags: { type: "array", items: { type: "string" }, description: "Like dinner, vegetarian, quick." },
+      },
+      required: ["title", "ingredients", "method"],
+    },
+    run: async (args, ctx) => {
+      const title = str(args, "title", 200);
+      if (!title) throw new Problem("Give the recipe a title.");
+      const source = str(args, "source_url", 500);
+      if (source && !/^https?:\/\/\S+$/i.test(source)) throw new Problem("source_url should be a web address, starting https://");
+      const ingredients = parseIngredients(lines(args, "ingredients").join("\n"));
+      const steps = parseSteps(lines(args, "method").join("\n"));
+      if (!ingredients.length && !steps.length) throw new Problem("Give the ingredients and method.");
+      const { data: recipe, error } = await ctx.db
+        .from("recipes")
+        .insert({
+          household_id: ctx.household,
+          title,
+          description: str(args, "description"),
+          source_url: source,
+          servings: whole(args, "servings", 1, 100),
+          prep_minutes: whole(args, "prep_minutes", 0, 10000),
+          cook_minutes: whole(args, "cook_minutes", 0, 10000),
+          created_by: ctx.me,
+        })
+        .select("id")
+        .single();
+      if (error) throw error;
+      // The parts go in after the recipe; if any fail, take the recipe back out rather than leave half of it.
+      const children: [string, object[]][] = [
+        ["recipe_ingredients", ingredients.map((i, n) => ({ ...i, recipe_id: recipe.id, position: n + 1 }))],
+        ["recipe_steps", steps.map((st, n) => ({ ...st, recipe_id: recipe.id, position: n + 1 }))],
+        ["recipe_tags", parseTags(lines(args, "tags", 20).join(",")).map((tag) => ({ recipe_id: recipe.id, tag }))],
+      ];
+      const parts = await Promise.all(children.filter(([, r]) => r.length).map(([table, r]) => ctx.db.from(table).insert(r)));
+      const failed = parts.find((p) => p.error)?.error;
+      if (failed) {
+        await ctx.db.from("recipes").delete().eq("id", recipe.id);
+        throw failed;
+      }
+      return { id: recipe.id, title, ingredients: ingredients.length, steps: steps.length, link: `${ctx.origin}/galley/${recipe.id}` };
+    },
+  },
+
+  list_meals: {
+    description: "The Galley's meal plan between two dates: each day's lunch and dinner, with the recipe_id when it's a recipe.",
+    input: {
+      type: "object",
+      properties: { from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD, included." } },
+      required: ["from", "to"],
+    },
+    run: async (args, ctx) => {
+      const from = day(args, "from");
+      const to = day(args, "to");
+      if (!from || !to) throw new Problem("Give from and to, YYYY-MM-DD.");
+      const found = rows<PlannedMeal[]>(
+        await ctx.db.from("meal_plans").select("day, meal, title, recipe_id").eq("household_id", ctx.household).gte("day", from).lte("day", to).order("day"),
+      );
+      return found.sort((a, b) => a.day.localeCompare(b.day) || (a.meal === "lunch" ? -1 : 1));
+    },
+  },
+
+  plan_meals: {
+    description:
+      "Plans lunches and dinners in the Galley's meal plan; they show at the top of each day on the Logbook. Each day has one lunch and one dinner: planning one that's already planned replaces it. Give a recipe_id, or just a title for something that isn't a recipe (\"Leftovers\", \"Takeaway\").",
+    input: {
+      type: "object",
+      properties: {
+        meals: {
+          type: "array",
+          maxItems: 60,
+          items: {
+            type: "object",
+            properties: {
+              date: { type: "string", description: "YYYY-MM-DD" },
+              meal: { type: "string", enum: Object.keys(MEALS) },
+              recipe_id: { type: "string", description: "From list_recipes." },
+              title: { type: "string", description: "Defaults to the recipe's." },
+            },
+            required: ["date", "meal"],
+          },
+        },
+      },
+      required: ["meals"],
+    },
+    run: async (args, ctx) => {
+      if (!Array.isArray(args.meals) || args.meals.length === 0) throw new Problem("Give the meals to plan.");
+      if (args.meals.length > 60) throw new Problem("60 meals at a time, at most.");
+      const given = args.meals.map((m) => (m ?? {}) as Record<string, unknown>);
+      const recipeIds = [...new Set(given.flatMap((m) => (m.recipe_id ? [id(m, "recipe_id")] : [])))];
+      const titles = new Map(
+        recipeIds.length
+          ? rows<{ id: string; title: string }[]>(await ctx.db.from("recipes").select("id, title").eq("household_id", ctx.household).in("id", recipeIds)).map((r) => [r.id, r.title])
+          : [],
+      );
+      const plans = given.map((m) => {
+        const date = day(m, "date");
+        if (!date) throw new Problem("Each meal needs a date, YYYY-MM-DD.");
+        if (!(String(m.meal) in MEALS)) throw new Problem("meal should be lunch or dinner.");
+        const recipeId = m.recipe_id ? id(m, "recipe_id") : null;
+        if (recipeId && !titles.has(recipeId)) throw new Problem(`No recipe ${recipeId} in the Galley. list_recipes has them.`);
+        const title = str(m, "title", 200) ?? (recipeId ? titles.get(recipeId)! : null);
+        if (!title) throw new Problem("Give a recipe_id or a title for each meal.");
+        return { household_id: ctx.household, day: date, meal: m.meal as MealSlot, title, recipe_id: recipeId, added_by: ctx.me };
+      });
+      // The last word on a slot wins, as if they'd been planned one by one.
+      const bySlot = new Map(plans.map((p) => [`${p.day}|${p.meal}`, p]));
+      rows(await ctx.db.from("meal_plans").upsert([...bySlot.values()], { onConflict: "household_id,day,meal" }));
+      return { planned: bySlot.size, link: `${ctx.origin}/galley/meals?week=${[...bySlot.values()].map((p) => p.day).sort()[0]}` };
+    },
+  },
+
+  add_to_shopping_list: {
+    description:
+      "Adds to the household's shared shopping list (in the Galley): recipes' ingredients (for their own servings, or how many you say), and anything else as items, written as a shopper would (\"2 L milk\").",
+    input: {
+      type: "object",
+      properties: {
+        recipes: {
+          type: "array",
+          maxItems: 30,
+          items: {
+            type: "object",
+            properties: { recipe_id: { type: "string" }, servings: { type: "integer", description: "Defaults to the recipe's." } },
+            required: ["recipe_id"],
+          },
+        },
+        items: { type: "array", items: { type: "string" } },
+      },
+    },
+    run: async (args, ctx) => {
+      const extras = lines(args, "items").map((name) => ({ household_id: ctx.household, name: name.slice(0, 200), added_by: ctx.me }));
+      if (!Array.isArray(args.recipes) && args.recipes !== undefined) throw new Problem("recipes should be a list.");
+      const wanted = ((args.recipes as unknown[] | undefined) ?? []).slice(0, 30).map((r) => {
+        const given = (r ?? {}) as Record<string, unknown>;
+        return { id: id(given, "recipe_id"), servings: whole(given, "servings", 1, 100) };
+      });
+      type Row = { id: string; title: string; servings: number | null; recipe_ingredients: { position: number; quantity: number | null; unit: string | null; name: string }[] };
+      const found = wanted.length
+        ? rows<Row[]>(
+            await ctx.db
+              .from("recipes")
+              .select("id, title, servings, recipe_ingredients(position, quantity, unit, name)")
+              .eq("household_id", ctx.household)
+              .in("id", [...new Set(wanted.map((w) => w.id))]),
+          )
+        : [];
+      const fromRecipes = wanted.flatMap((w) => {
+        const recipe = found.find((r) => r.id === w.id);
+        if (!recipe) throw new Problem(`No recipe ${w.id} in the Galley. list_recipes has them.`);
+        const base = recipe.servings ?? 1;
+        return recipe.recipe_ingredients
+          .sort((a, b) => a.position - b.position)
+          .map((i) => ({ household_id: ctx.household, recipe_id: recipe.id, name: shoppingLine({ ...i, notes: null }, base, w.servings ?? base), added_by: ctx.me }));
+      });
+      const items = [...fromRecipes, ...extras];
+      if (items.length === 0) throw new Problem("Give recipes or items to add.");
+      rows(await ctx.db.from("shopping_items").insert(items));
+      return { added: items.map((i) => i.name), link: `${ctx.origin}/galley/shopping` };
     },
   },
 

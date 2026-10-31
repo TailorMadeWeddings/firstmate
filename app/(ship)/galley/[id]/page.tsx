@@ -8,10 +8,12 @@ import { PhotoPicker } from "@/components/photo-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PHOTO_BUCKET, minutes } from "@/lib/galley";
+import { NativeSelect } from "@/components/ui/native-select";
+import { MEALS, PHOTO_BUCKET, minutes } from "@/lib/galley";
 import { dayKey } from "@/lib/logbook";
 import { currentMember } from "@/lib/players";
-import { deleteRecipe, fileRecipe, planMeal, setRecipePhoto } from "../actions";
+import { deleteRecipe, fileRecipe, setRecipePhoto } from "../actions";
+import { planRecipe } from "../meals/actions";
 import { accessTo, loadCollections, loadRecipe } from "../data";
 import { Ingredients } from "./ingredients";
 
@@ -100,16 +102,25 @@ async function RecipeView({ params }: { params: Promise<{ id: string }> }) {
               <summary className="flex h-10 cursor-pointer list-none items-center gap-2 px-4 text-sm font-semibold">
                 <CalendarPlus className="size-4" aria-hidden /> Add to meal plan
               </summary>
-              <ActionForm action={planMeal.bind(null, recipe.id)} reset={false} className="flex flex-wrap items-end gap-3 border-t p-4">
+              <ActionForm action={planRecipe.bind(null, recipe.id)} reset={false} className="flex flex-wrap items-end gap-3 border-t p-4">
                 <div className="grid gap-1">
                   <Label htmlFor="meal-date">Day</Label>
                   <Input id="meal-date" name="date" type="date" defaultValue={dayKey(new Date())} required />
                 </div>
                 <div className="grid gap-1">
-                  <Label htmlFor="meal-time">Start cooking</Label>
-                  <Input id="meal-time" name="time" type="time" defaultValue="17:30" required />
+                  <Label htmlFor="meal-slot">Meal</Label>
+                  <NativeSelect id="meal-slot" name="meal" defaultValue="dinner">
+                    {Object.entries(MEALS).map(([value, name]) => (
+                      <option key={value} value={value}>
+                        {name}
+                      </option>
+                    ))}
+                  </NativeSelect>
                 </div>
-                <Button>Add to the Logbook</Button>
+                <Button>Plan it</Button>
+                <Link href="/galley/meals" className="pb-2 text-sm font-semibold text-primary hover:underline dark:text-blue-400">
+                  Meal plan
+                </Link>
               </ActionForm>
             </details>
           )}
@@ -155,7 +166,7 @@ async function RecipeView({ params }: { params: Promise<{ id: string }> }) {
         </section>
       )}
 
-      {recipe.ingredients.length > 0 && <Ingredients ingredients={recipe.ingredients} servings={recipe.servings} />}
+      {recipe.ingredients.length > 0 && <Ingredients ingredients={recipe.ingredients} servings={recipe.servings} shop={crew ? recipe.id : undefined} />}
 
       {recipe.steps.length > 0 && (
         <section className="flex flex-col gap-4">

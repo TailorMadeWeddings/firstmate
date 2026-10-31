@@ -6,8 +6,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { PHOTO_BUCKET, parseIngredients, parseSteps, parseTags } from "@/lib/galley";
-import { addDays, fromWall, startOfDay } from "@/lib/logbook";
-import { currentCrew, currentMember } from "@/lib/players";
+import { currentMember } from "@/lib/players";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -102,39 +101,6 @@ export async function markCooked(recipeId: string): Promise<void> {
   if (error) console.error(error);
   done();
   redirect(`/galley/${recipeId}`);
-}
-
-/** Puts a recipe on the Logbook as a meal, so it can be cooked from there. */
-export async function planMeal(recipeId: string, _: Result, form: FormData): Promise<Result> {
-  const member = await currentCrew();
-  const day = text(form, "date");
-  const time = text(form, "time");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^\d{2}:\d{2}$/.test(time)) return "Pick a day and a time.";
-  const supabase = await createClient();
-  const { data: recipe } = await supabase.from("recipes").select("title, prep_minutes, cook_minutes").eq("id", recipeId).maybeSingle();
-  if (!recipe) return "That recipe has gone.";
-  const [y, m, d] = day.split("-").map(Number);
-  const [h, min] = time.split(":").map(Number);
-  const start = fromWall({ y, m, d, h, min });
-  // As long as the recipe takes, at least half an hour, and not past midnight.
-  const length = Math.max(30, (recipe.prep_minutes ?? 0) + (recipe.cook_minutes ?? 0) || 60);
-  const end = new Date(Math.min(start.getTime() + length * 60_000, startOfDay(addDays(day, 1)).getTime()));
-  const { error } = await supabase.from("events").insert({
-    household_id: member.householdId,
-    title: recipe.title,
-    start_at: start.toISOString(),
-    end_at: end.toISOString(),
-    all_day: false,
-    created_by: member.id,
-    recipe_id: recipeId,
-  });
-  if (error) {
-    console.error(error);
-    return "Couldn't add it to the Logbook. Try again.";
-  }
-  revalidatePath("/logbook", "layout");
-  revalidatePath("/");
-  redirect(`/logbook?view=day&date=${day}`);
 }
 
 // ---------- collections (Captains curate and share them) ----------

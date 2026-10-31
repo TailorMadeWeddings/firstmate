@@ -20,6 +20,7 @@ import {
   parseSteps,
   parseTags,
   scaled,
+  shoppingLine,
   unitFor,
 } from "./galley.ts";
 
@@ -164,4 +165,9 @@ test("cooking timers count down, pause and resume", () => {
   assert.equal(remaining(t, 99 * 60 * 60_000), 0);
   assert.equal(clock(3_909_000), "1:05:09");
   assert.equal(clock(0), "0:00");
+});
+
+test("shopping lines scale with servings and drop the prep notes", () => {
+  assert.equal(shoppingLine(parseIngredient("2 cups plain flour, sifted")!, 4, 6), "3 cups plain flour");
+  assert.equal(shoppingLine(parseIngredient("salt, to taste")!, 4, 8), "salt");
 });
