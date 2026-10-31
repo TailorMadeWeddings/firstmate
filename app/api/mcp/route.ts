@@ -1,7 +1,7 @@
 // First Mate as an MCP server, for Claude: the Logbook (calendar), Duties
 // (tasks), the Galley (recipes, and meals planned on the Logbook), Portraits
 // (photos and albums), your own gym routines and, for Owners, reconciling the
-// Ledger.
+// Ledger, and grocery prices.
 // Signs in as a person: with a token from OAuth (Claude's connector, see
 // app/oauth) or their key from Exercise, as Authorization: Bearer fm_…
 // The secret key skips row-level security, so every tool keeps to the key
@@ -13,6 +13,7 @@ import { findRecipes, ingredientLine, parseTags, type RecipeCard } from "@/lib/g
 import { hashKey } from "@/lib/health";
 import { type EventRow, type ExceptionRow, WEEKDAYS, addDays, dayKey, describeRepeat, fromWall, occurrences, startOfDay, wallOf } from "@/lib/logbook";
 import { Problem, type Tool, answer } from "@/lib/mcp";
+import { STORES, type Store, type Unit, UNIT_LABEL, mainUnit, perUnit } from "@/lib/prices";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type Admin = ReturnType<typeof createAdminClient>;
@@ -26,7 +27,9 @@ const INSTRUCTIONS =
   "Routines are the signed-in person's own gym workouts, opened on their phone at the gym and logged there. " +
   "For the weekly progression, read get_routines (its recent_logs show what was actually done), then update_routine. " +
   "The Ledger is the household's money, for Owners only. To reconcile, read list_unreconciled (past_choices show how merchants were categorised before), " +
-  "then suggest_categories; an Owner confirms on the Ledger's Reconcile page.";
+  "then suggest_categories; an Owner confirms on the Ledger's Reconcile page. " +
+  "Prices are what groceries cost: Coles, Woolworths, Aldi and Harris Farm are checked every morning, and Costco (which doesn't list warehouse prices online) " +
+  "comes from receipts. Given a receipt, read it, check list_prices for the ingredient names already used, then add_prices.";
 
 // ---------- arguments ----------
 
@@ -198,6 +201,20 @@ const routineFields = {
     },
   },
 };
+
+// ---------- grocery prices ----------
+
+type PriceItem = { id: string; name: string };
+
+/** The ingredient called name, followed from now on if it wasn't already. */
+async function priceItem(ctx: Ctx, name: string, known: PriceItem[]): Promise<PriceItem> {
+  const found = known.find((i) => i.name.toLowerCase() === name.toLowerCase());
+  if (found) return found;
+  const { data, error } = await ctx.db.from("price_items").insert({ household_id: ctx.household, name, search: name, created_by: ctx.me }).select("id, name").single();
+  if (error) throw error;
+  known.push(data);
+  return data;
+}
 
 // ---------- tools ----------
 
@@ -777,6 +794,113 @@ const TOOLS: Record<string, Tool<Ctx>> = {
       });
       if (error) throw error;
       return `Logged ${routine.name} on ${date}.`;
+    },
+  },
+
+  list_prices: {
+    description:
+      "Grocery prices: each ingredient the family follows, with what it costs at each store per kg, L or each: usual (the median over the last year), lowest, " +
+      "and the latest (cheapest product on the last day it was seen there). search matches ingredient names.",
+    input: { type: "object", properties: { search: { type: "string" } } },
+    run: async (args, ctx) => {
+      type Row = { item_id: string; store: Store; unit: Unit; usual: number; lowest: number; days: number; product: string; size: string | null; price: number; was_price: number | null; unit_price: number; seen_on: string };
+      const [items, summary] = await Promise.all([
+        ctx.db.from("price_items").select("id, name, search").eq("household_id", ctx.household).order("name"),
+        ctx.db.from("price_summary").select("item_id, store, unit, usual, lowest, days, product, size, price, was_price, unit_price, seen_on").eq("household_id", ctx.household),
+      ]);
+      const all = rows<Row[]>(summary);
+      const words = (str(args, "search") ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+      return rows<{ id: string; name: string; search: string }[]>(items)
+        .filter((i) => words.every((w) => i.name.toLowerCase().includes(w)))
+        .map((i) => {
+          const mine = all.filter((r) => r.item_id === i.id);
+          const unit = mainUnit(mine);
+          return {
+            ingredient: i.name,
+            searched_as: i.search,
+            per: unit ? UNIT_LABEL[unit] : null,
+            stores: mine.filter((r) => r.unit === unit).map((r) => ({
+              store: STORES[r.store], usual: Number(r.usual), lowest: Number(r.lowest), days_seen: r.days,
+              latest: { date: r.seen_on, product: r.product, size: r.size, price: Number(r.price), ...(r.was_price ? { was: Number(r.was_price) } : {}), per_unit: Number(r.unit_price) },
+            })),
+          };
+        });
+    },
+  },
+
+  add_prices: {
+    description:
+      "Adds prices read off a receipt (usually Costco, whose warehouse prices aren't online) to the family's grocery prices. " +
+      "ingredient is the plain name to file it under: reuse one from list_prices when it's the same thing, so its history builds up " +
+      "(a new name is followed from now on, and the supermarkets are checked for it every morning). " +
+      "price is for one of the product: divide a line for several by how many. size, like \"3L\", \"2.5kg\" or \"6 x 375ml\", gives the price per kg, L or each.",
+    input: {
+      type: "object",
+      properties: {
+        store: { type: "string", enum: Object.keys(STORES) },
+        date: { type: "string", description: "YYYY-MM-DD, from the receipt. Defaults to today." },
+        prices: {
+          type: "array",
+          maxItems: 100,
+          items: {
+            type: "object",
+            properties: {
+              ingredient: { type: "string", description: "Plain name, like Full cream milk or Chicken thigh fillets." },
+              product: { type: "string", description: "As the receipt has it, like \"KS MILK 2X3L\"." },
+              product_id: { type: "string", description: "The receipt's item number, if it has one." },
+              price: { type: "number" },
+              was_price: { type: "number", description: "Before a discount the receipt shows, if any." },
+              size: { type: "string" },
+            },
+            required: ["ingredient", "product", "price"],
+          },
+        },
+      },
+      required: ["store", "prices"],
+    },
+    run: async (args, ctx) => {
+      const store = str(args, "store") as Store | null;
+      if (!store || !(store in STORES)) throw new Problem(`store should be one of ${Object.keys(STORES).join(", ")}.`);
+      const date = day(args, "date") ?? dayKey(new Date());
+      if (date > dayKey(new Date())) throw new Problem("That date is in the future.");
+      const given = Array.isArray(args.prices) ? args.prices : [];
+      if (given.length === 0) throw new Problem("Give some prices, each an ingredient, product and price.");
+      if (given.length > 100) throw new Problem("100 lines at a time, at most.");
+      // Check them all before saving any, so a bad line doesn't leave half a receipt.
+      const lines = given.map((g: Record<string, unknown>, n: number) => {
+        const line = (g && typeof g === "object" ? g : {}) as Record<string, unknown>;
+        const ingredient = str(line, "ingredient", 80);
+        const product = str(line, "product", 200);
+        const price = Number(line.price);
+        const was = line.was_price === undefined || line.was_price === null ? null : Number(line.was_price);
+        if (!ingredient || !product) throw new Problem(`Line ${n + 1}: give the ingredient and the product.`);
+        if (!(price >= 0 && price < 10000)) throw new Problem(`Line ${n + 1} (${product}): price should be dollars, like 12.99.`);
+        if (was !== null && !(was > price && was < 10000)) throw new Problem(`Line ${n + 1} (${product}): was_price should be more than price.`);
+        const size = str(line, "size", 40);
+        return {
+          ingredient, product, size, price: Math.round(price * 100) / 100, was_price: was === null ? null : Math.round(was * 100) / 100,
+          product_id: str(line, "product_id", 40) ?? product.toLowerCase(), ...perUnit(price, size ?? product),
+        };
+      });
+      const known = rows<PriceItem[]>(await ctx.db.from("price_items").select("id, name").eq("household_id", ctx.household));
+      const before = known.length;
+      const saved = [];
+      for (const { ingredient, ...l } of lines) saved.push({ ...l, item_id: (await priceItem(ctx, ingredient, known)).id });
+      // A product twice on one receipt is one price.
+      const unique = [...new Map(saved.map((l) => [`${l.item_id}|${l.product_id}`, l])).values()];
+      const { error } = await ctx.db.from("prices").upsert(
+        unique.map((l) => ({ ...l, household_id: ctx.household, store, seen_on: date, source: "receipt", added_by: ctx.me })),
+        { onConflict: "item_id,store,product_id,seen_on" },
+      );
+      if (error) throw error;
+      return {
+        saved: unique.length,
+        store: STORES[store],
+        date,
+        ...(known.length > before ? { now_following: known.slice(before).map((i) => i.name) } : {}),
+        ...(lines.some((l) => !l.unit) ? { no_size: lines.filter((l) => !l.unit).map((l) => l.product) } : {}),
+        link: `${ctx.origin}/galley/prices`,
+      };
     },
   },
 
