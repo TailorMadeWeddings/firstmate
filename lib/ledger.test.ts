@@ -33,6 +33,9 @@ test("amounts parse exactly, and only sensible ones", () => {
     assert.equal(parseAmount(bad), null, bad);
   }
   assert.equal(parseAmount("-250.00", true), "-250.00");
+  assert.equal(parseAmount("\u2212439.49", true), "-439.49");
+  assert.equal(parseAmount("\u2013439.49", true), "-439.49");
+  assert.equal(parseAmount("\u2212439.49"), null, "still positive-only unless signed");
   assert.equal(parseAmount("0", true), "0");
   assert.equal(signed("84.20", "expense"), "-84.20");
   assert.equal(signed("1500", "income"), "1500");
