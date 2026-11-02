@@ -1104,9 +1104,15 @@ const TOOLS: Record<string, Tool<Ctx>> = {
     description:
       "Ledger (Owners only): merchants whose imported transactions nobody has categorised, most transactions first, " +
       "with the household's categories and past_choices (how each merchant was categorised before) to go by. " +
-      "total is negative for money out. Merchants the Ledger already remembers aren't listed. " +
-      "A merchant you suggested earlier comes back with your_suggestion.",
-    input: { type: "object", properties: { limit: { type: "number", description: "Merchants to list, up to 200 (default 100)." } } },
+      "total is negative for money out. Merchants the Ledger already remembers aren't listed, nor (unless include_suggested) " +
+      "ones you've already suggested for; remaining says how many merchants are left without a suggestion.",
+    input: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Merchants to list, up to 200 (default 100)." },
+        include_suggested: { type: "boolean", description: "Also list merchants you suggested for before, with your_suggestion, to revise them." },
+      },
+    },
     run: async (args, ctx) => {
       ledgerOwner(ctx);
       const limit = Math.min(Math.max(Math.trunc(Number(args.limit) || 100), 1), 200);
@@ -1114,9 +1120,9 @@ const TOOLS: Record<string, Tool<Ctx>> = {
       const [waiting, categories, payees] = await Promise.all([
         ctx.db
           .from("budget_pending")
-          .select("merchant, transactions, total, first, last, example, suggestion")
+          .select("merchant, transactions, total, first, last, example, suggestion", { count: "exact" })
           .eq("household_id", ctx.household)
-          .or("suggested_by.is.null,suggested_by.eq.claude")
+          .or(args.include_suggested === true ? "suggested_by.is.null,suggested_by.eq.claude" : "suggested_by.is.null")
           .order("transactions", { ascending: false })
           .order("merchant")
           .limit(limit),
@@ -1134,6 +1140,7 @@ const TOOLS: Record<string, Tool<Ctx>> = {
         categories: all.filter((c) => !c.archived_at).map((c) => ({ id: c.id, name: name(c.id), type: c.type })),
         transfer: "Use category_id \"transfer\" for money moved to or from the household's own accounts.",
         past_choices: rows<{ merchant: string; category_id: string | null }[]>(payees).map((p) => ({ merchant: p.merchant, category: name(p.category_id) })),
+        remaining: waiting.count,
         waiting: rows<Waiting[]>(waiting).map(({ suggestion, ...w }) => ({ ...w, ...(suggestion ? { your_suggestion: name(suggestion) } : {}) })),
       };
     },
