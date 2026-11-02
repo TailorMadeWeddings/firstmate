@@ -17,7 +17,8 @@ export type Category = {
  * one. "$1,234.5" → "1234.5". Positive only unless signed is set.
  */
 export function parseAmount(input: string, signed = false): string | null {
-  const s = input.trim().replace(/[$,\s]/g, "");
+  // A minus pasted from elsewhere is often − (U+2212) or a dash, not "-".
+  const s = input.trim().replace(/[$,\s]/g, "").replace(/^[\u2212\u2012\u2013\u2014]/, "-");
   const ok = signed ? /^-?\d{1,10}(\.\d{1,2})?$/ : /^\d{1,10}(\.\d{1,2})?$/;
   if (!ok.test(s) || (!signed && Number(s) === 0)) return null;
   return s;
