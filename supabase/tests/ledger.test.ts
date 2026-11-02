@@ -302,6 +302,10 @@ test("payees: the merchant is the description without the noise", async () => {
     "Fast Transfer From SAM SAMPLE dinner": "FAST TRANSFER FROM SAM SAMPLE",
     "Direct Debit 468880 REVENUENSW Debt 000000029685056": "DIRECT DEBIT REVENUENSW DEBT",
     "International Transaction Fee Value Date: 09/10/2026": "INTERNATIONAL TRANSACTION FEE",
+    "Apple APPLE.COM/BILL MML4K69W9Ma1": "APPLE APPLE.COM/BILL",
+    "008Pin* Chargefox Pty Ltd North Melbour": "CHARGEFOX PTY LTD NORTH MELBOUR",
+    "COLES 0746 WARATAH 02 AUS Card xx1569 Value Date: 12/03/2026": "COLES WARATAH",
+    "AMPOL NEW LAMBT 22514F NEW LAMBTON AUS Card xx1569 Value Date: 04/07/2026": "AMPOL NEW LAMBT 22514F NEW LAMBTON",
   };
   for (const [description, merchant] of Object.entries(cases)) {
     const r = await db.query<{ m: string }>("select budget_merchant($1) as m", [description]);
