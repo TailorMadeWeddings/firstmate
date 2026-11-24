@@ -1,8 +1,8 @@
 -- Migration: ledger_merchant_cleanup
 -- Three kinds of bank text were splitting one shop into many merchants:
--- Apple bills end in a reference ("APPLE APPLE.COM/BILL MML4K69W9MA1"),
--- Chargefox starts with a changing number ("008Pin* Chargefox …"), and some
--- card lines carry a stray "02" ("COLES 0746 WARATAH 02 AUS …"). Same
+-- Apple bills end in a reference ("APPLE APPLE.COM/BILL ABC1D23E4FA1"),
+-- Chargefox starts with a changing number ("123Pin* Chargefox …"), and some
+-- card lines carry a stray "02" ("COLES 1234 NEWTOWN 02 AUS …"). Same
 -- function, one step per line now, then every transaction's merchant is
 -- worked out again, and remembered payees move to their new names.
 
@@ -15,7 +15,7 @@ as $$
 declare
   d text := description;
 begin
-  -- card purchases: "… Card xx1569 USD 6.00 Value Date: 10/07/2026"
+  -- card purchases: "… Card xx1234 USD 6.00 Value Date: 10/07/2026"
   d := regexp_replace(d, '\s+(Card xx\d+|Value Date:).*$', '', 'i');
   -- transfers: the note after "CommBank App" differs every time
   d := regexp_replace(d, '\s+(CommBank App|PayID Phone|CREDIT TO ACCOUNT)\M.*$', '', 'i');
@@ -23,9 +23,9 @@ begin
   d := regexp_replace(d, '^(Fast Transfer From \S+ \S+).*$', '\1', 'i');
   -- Apple: a reference per bill
   d := regexp_replace(d, '^(Apple APPLE\.COM/BILL)\s.*$', '\1', 'i');
-  -- payment processors: "SQ *", "NXT*", "SMP*", and Chargefox's "008Pin*"
+  -- payment processors: "SQ *", "NXT*", "SMP*", and Chargefox's "123Pin*"
   d := regexp_replace(d, '^(\d+PIN|[A-Z]{2,4}) ?\* ?', '', 'i');
-  -- store and reference numbers, but not account numbers like xx0689
+  -- store and reference numbers, but not account numbers like xx5678
   d := regexp_replace(d, '\m\d{3,}\M', '', 'g');
   -- state and country on the end
   d := regexp_replace(d, '(\s+(NSW?|NSWAU|AUS?|USA))+$', '', 'i');

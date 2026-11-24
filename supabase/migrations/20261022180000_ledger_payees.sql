@@ -7,8 +7,8 @@
 -- transactions, including ones imported later. Suggestions wait for an
 -- Owner to confirm them; only confirmations teach the Ledger.
 
--- "SQ *ELMAS ON CLYDE Hamilton Nort AU" → "ELMAS ON CLYDE HAMILTON NORT",
--- "COLES 0746 WARATAH NS AUS Card xx1569 Value Date: 24/07/2026" → "COLES WARATAH".
+-- "SQ *EXAMPLE CAFE Newtown Nort AU" → "EXAMPLE CAFE NEWTOWN NORT",
+-- "COLES 1234 NEWTOWN NS AUS Card xx1234 Value Date: 24/07/2026" → "COLES NEWTOWN".
 -- ponytail: tuned on CommBank exports; each suburb's Coles is its own
 -- merchant. Changing this later means dropping and re-adding the column.
 create function public.budget_merchant(description text) returns text
@@ -24,7 +24,7 @@ as $$
     regexp_replace(
     regexp_replace(
     regexp_replace(description,
-      -- card purchases: "… Card xx1569 USD 6.00 Value Date: 10/07/2026"
+      -- card purchases: "… Card xx1234 USD 6.00 Value Date: 10/07/2026"
       '\s+(Card xx\d+|Value Date:).*$', '', 'i'),
       -- transfers: the note after "CommBank App" differs every time
       '\s+(CommBank App|PayID Phone|CREDIT TO ACCOUNT)\M.*$', '', 'i'),
@@ -32,7 +32,7 @@ as $$
       '^(Fast Transfer From \S+ \S+).*$', '\1', 'i'),
       -- payment processors: "SQ *", "NXT*", "SMP*"
       '^[A-Z]{2,4} ?\* ?', '', 'i'),
-      -- store and reference numbers, but not account numbers like xx0689
+      -- store and reference numbers, but not account numbers like xx5678
       '\m\d{3,}\M', '', 'g'),
     -- state and country on the end
     '(\s+(NSW?|NSWAU|AUS?|USA))+$', '', 'i'),
