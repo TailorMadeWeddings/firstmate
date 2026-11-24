@@ -17,14 +17,14 @@ const december = [
   "1|200|56|05/01 800000002 Late fee",
   "1|200|530|$10.00",
   "1|240|56|06/01 800000002 Payment +$10.00",
-  "1|280|56|20/01 900000002 Order from HOTELCOM73465381394476 $20.00",
+  "1|280|56|20/01 900000002 Order from HOTELCOM12345678901234 $20.00",
 ].join("\n");
 const january = [
   "0|67|463|21 Jan - 20 Feb 2027",
   "0|100|500|Opening balance $130.00",
   "0|112|500|Closing balance $90.00",
-  "0|300|56|21/01 900000002 Order from HOTELCOM73465381394476 $20.00",
-  "0|340|56|22/01 900000002 Refund from HOTELCOM73465381394476 +$20.00",
+  "0|300|56|21/01 900000002 Order from HOTELCOM12345678901234 $20.00",
+  "0|340|56|22/01 900000002 Refund from HOTELCOM12345678901234 +$20.00",
   "0|380|56|30/01 See Below Bundled Payment +$40.00",
 ].join("\n");
 

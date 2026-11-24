@@ -67,7 +67,7 @@ export function parseStatement(lines: string): Statement {
     if (!amount) continue; // a refund still pending has no amount yet
     const date = `${Number(mm) > endMonth ? endYear - 1 : endYear}-${mm}-${dd}`;
     const value = cents(amount);
-    // "HOTELCOM73465381394476" → "HOTELCOM", so every booking is one shop.
+    // "HOTELCOM12345678901234" → "HOTELCOM", so every booking is one shop.
     const shop = (s: string) => s.replace(/\d{6,}$/, "").trim();
     if (desc.startsWith("Order from ")) out.push({ date, cents: -value, description: shop(desc.slice(11)), order });
     else if (desc.startsWith("Refund from ")) out.push({ date, cents: value, description: shop(desc.slice(12)), order: null });

@@ -1,7 +1,7 @@
 -- Migration: ledger_payee_report
 -- Spending per payee, for finding what to cut. A payee is a merchant, or
--- several merchants an Owner has given the same name ("COLES WARATAH" and
--- "COLES KOTARA" both named "Coles").
+-- several merchants an Owner has given the same name ("COLES NEWTOWN" and
+-- "COLES OLDTOWN" both named "Coles").
 
 alter table public.budget_payees
   add column name text check (name <> '');
